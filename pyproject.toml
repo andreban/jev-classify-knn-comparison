@@ -1,0 +1,25 @@
+[project]
+name = "toxic-comment-classification-challenge"
+description = "Toxic Comment Classification Challenge"
+version = "0.1.0"
+requires-python = ">=3.10.0,<3.11.0"
+
+dependencies = [
+    "numpy (>=1.26.0,<3.0.0)",
+    "sentence-transformers (>=4.1.0,<5.0.0)",
+    "ai-edge-torch-nightly (>=0.5.0.dev20250502,<0.6.0)",
+    "google-genai (>=1.13.0,<2.0.0)",
+    "onnx (>=1.17.0,<2.0.0)",
+    "onnxscript (>=0.2.5,<0.3.0)"
+]
+
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.dependencies]
+torch = { version = ">=2.7.0,<3.0.0" }
+
+[[tool.poetry.source]]
+name = "pytorch_cuda"
+url = "https://download.pytorch.org/whl/cu128"
+priority = "explicit"

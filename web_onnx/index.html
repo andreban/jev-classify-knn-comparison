@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Toxicity Classification Demo</title>
+    <style>
+      body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; }
+      .container { max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+      h1, h2 { text-align: center; color: #333; }
+      textarea { display: block; width: 95%; min-height: 100px; margin-bottom: 15px; padding: 10px; font-size: 1em; border: 1px solid #ccc; border-radius: 4px; }
+      button { display: block; width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 1.1em; cursor: pointer; margin-bottom: 20px; transition: background-color 0.3s ease; }
+      button:hover { background-color: #0056b3; }
+      #results { margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px; }
+      .result-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee; }
+      .result-item:last-child { border-bottom: none; }
+      .label { font-weight: bold; color: #555; }
+      .score { font-family: monospace; background-color: #e9ecef; padding: 3px 6px; border-radius: 3px; font-size: 0.95em; }
+    </style>
+    <script type="module" src="/src/main.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Toxicity Classification</h1>
+      <textarea id="input" placeholder="Enter text here..."></textarea>
+      <button id="btn">Classify Text</button>
+      <div id="results">
+        <h2>Results:</h2>
+        <div class="result-item">
+          <span class="label">Toxic:</span>
+          <span class="score" id="toxic-score">N/A</span>
+        </div>
+        <div class="result-item">
+          <span class="label">Severe Toxic:</span>
+          <span class="score" id="severe_toxic-score">N/A</span>
+        </div>
+        <div class="result-item">
+          <span class="label">Obscene:</span>
+          <span class="score" id="obscene-score">N/A</span>
+        </div>
+        <div class="result-item">
+          <span class="label">Threat:</span>
+          <span class="score" id="threat-score">N/A</span>
+        </div>
+        <div class="result-item">
+          <span class="label">Insult:</span>
+          <span class="score" id="insult-score">N/A</span>
+        </div>
+        <div class="result-item">
+          <span class="label">Identity Hate:</span>
+          <span class="score" id="identity_hate-score">N/A</span>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

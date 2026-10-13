@@ -1,0 +1,12 @@
+{
+  "approach": "pytorch_gemini",
+  "train_size": 8000,
+  "val_size": 2000,
+  "epochs": 100,
+  "lr": 0.0001,
+  "batch_size": 512,
+  "val_element_accuracy": 0.9827499985694885,
+  "train_time_seconds": 8.632122832990717,
+  "val_inference_time_seconds": 0.004522582981735468,
+  "per_comment_latency_ms": 0.002261291490867734
+}

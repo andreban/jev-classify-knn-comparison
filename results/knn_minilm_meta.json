@@ -1,0 +1,11 @@
+{
+  "approach": "knn_minilm",
+  "k": 7,
+  "metric": "euclidean",
+  "train_size": 8000,
+  "val_size": 2000,
+  "val_element_accuracy": 0.9726666808128357,
+  "train_time_seconds": 0.0,
+  "val_inference_time_seconds": 0.02782079199096188,
+  "per_comment_latency_ms": 0.01391039599548094
+}
