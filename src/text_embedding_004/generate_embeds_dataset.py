@@ -1,55 +1,76 @@
 import csv
 import json
-import google.genai as genai
-from google.genai import types
+import os
 import time
 from pathlib import Path
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
-GOOGLE_GENAI_API_KEY = "YOUR_API_KEY"
-EMBEDDING_MODEL = "text-embedding-004"
+load_dotenv()
+
+GOOGLE_GENAI_API_KEY = os.environ["GEMINI_API_KEY"]
+EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
 OUTPUT_DIMENSIONALITY = 768
-OUTPUT_FILE = f"YT-comments-{EMBEDDING_MODEL}-{OUTPUT_DIMENSIONALITY}.jsonl"
-SLEEP_LENGTH = 0.3
+OUTPUT_FILE = "YT-comments-text-embedding-004-768-10k.jsonl"
+MAX_RECORDS = 10000
+BATCH_SIZE = 100
 
-genai = genai.Client(api_key=GOOGLE_GENAI_API_KEY)
+client = genai.Client(api_key=GOOGLE_GENAI_API_KEY)
 
 skip_lines = 0
-output_file = Path(OUTPUT_FILE)
-if output_file.exists():
-    with open(output_file, "r") as file:
+output_path = Path(OUTPUT_FILE)
+if output_path.exists():
+    with open(output_path, "r", encoding="utf-8") as file:
         skip_lines = sum(1 for _ in file)
 
-print(skip_lines)
+print(f"Existing records in {OUTPUT_FILE}: {skip_lines}")
 with open("data/train.csv", "r", encoding="utf-8") as dataset_file:
     dataset_csv = csv.DictReader(dataset_file)
+    entries = []
+    for i, entry in enumerate(dataset_csv):
+        if i >= MAX_RECORDS:
+            break
+        if i < skip_lines:
+            continue
+        entries.append(entry)
 
-    with open(output_file, "a") as output_file:
-        record_count = 0
-        for entry in dataset_csv:
-            record_count += 1
-            print(record_count)
-            if (record_count <= skip_lines):
-                continue
+if entries:
+    with open(output_path, "a", encoding="utf-8") as out_f:
+        for start in range(0, len(entries), BATCH_SIZE):
+            batch = entries[start : start + BATCH_SIZE]
+            texts = [e['comment_text'] for e in batch]
 
-            embedding_response = genai.models.embed_content(
-                model=EMBEDDING_MODEL,
-                contents=entry['comment_text'],                
-                config=types.EmbedContentConfig(task_type="CLASSIFICATION")
-            )
+            for attempt in range(6):
+                try:
+                    embedding_response = client.models.embed_content(
+                        model=EMBEDDING_MODEL,
+                        contents=texts,
+                        config=types.EmbedContentConfig(
+                            task_type="CLASSIFICATION",
+                            output_dimensionality=OUTPUT_DIMENSIONALITY,
+                        ),
+                    )
+                    break
+                except Exception as exc:
+                    wait_s = 2 ** attempt
+                    print(f"Batch failed (attempt {attempt + 1}/6): {exc}. Retrying in {wait_s}s...")
+                    time.sleep(wait_s)
+            else:
+                raise RuntimeError("Exceeded max retries for Gemini embedding batch")
 
-            result = {
-                'id': entry['id'],
-                'embeddings': embedding_response.embeddings[0].values,
-                'toxic': entry['toxic'],
-                'severe_toxic': entry['severe_toxic'],
-                'obscene': entry['obscene'],
-                'threat': entry['threat'],
-                'insult': entry['insult'],
-                'identity_hate': entry['identity_hate'],                                                                                
-            }
-            json_result = json.dumps(result)
-            output_file.write(json_result + "\n")
-            output_file.flush()
-            time.sleep(SLEEP_LENGTH)
-
-              
+            for entry, emb_obj in zip(batch, embedding_response.embeddings):
+                result = {
+                    'id': entry['id'],
+                    'comment_text': entry['comment_text'],
+                    'embeddings': emb_obj.values,
+                    'toxic': entry['toxic'],
+                    'severe_toxic': entry['severe_toxic'],
+                    'obscene': entry['obscene'],
+                    'threat': entry['threat'],
+                    'insult': entry['insult'],
+                    'identity_hate': entry['identity_hate'],
+                }
+                out_f.write(json.dumps(result) + "\n")
+            out_f.flush()
+            print(f"Processed {skip_lines + start + len(batch)} / {MAX_RECORDS}")

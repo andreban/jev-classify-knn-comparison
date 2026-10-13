@@ -172,7 +172,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-data/
-*.jsonl
-*.safetensors
+.DS_Store
+data/train.csv
+/*.jsonl
+*.gz
 /*.tflite

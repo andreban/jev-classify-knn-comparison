@@ -1,11 +1,14 @@
+import os
 import torch
 import sys
+from dotenv import load_dotenv
 from text_embedding_004.toxicity_model import ToxicityModel
 from torch.nn import functional as F
 import google.genai as genai
 from google.genai import types
 
-GOOGLE_GENAI_API_KEY = "AIzaSyDDDJbeeiAJn-6A5gwxp5Wn_pJT-JwVYwA"
+load_dotenv()
+GOOGLE_GENAI_API_KEY = os.environ["GEMINI_API_KEY"]
 EMBEDDING_MODEL = "text-embedding-004"
 OUTPUT_DIMENSIONALITY = 768
 
