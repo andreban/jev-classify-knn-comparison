@@ -1,247 +1,281 @@
-In my [last post][spam], I replaced the comment spam filter I had been planning to train for this blog with [Jev][jev], TypeSafe's "System One" decision model. Instead of collecting thousands of labeled comments, generating embeddings, and training a classifier, I described what spam looks like in plain language and asked Jev a single yes/no question ([Noul][noul]) per comment. On the 102 comments my blog had accumulated so far, it reached a `0.922` ROC-AUC without ever seeing a training example.
+![A pixel-art nightclub with two doors. At the left door, a bouncer with a "JEV" badge glances at a small card with a single rule on it. At the right door, a second bouncer checks each guest against a towering stack of photo binders. At both doors, smiling blue characters are let in while grumpy orange ones are held behind a velvet rope.](/images/hero-two-bouncers.png)
 
-At the end of that post, under *"What I didn't measure"*, I left an open question:
+In my [last post][spam], I skipped training a comment spam filter for this blog and used [Jev][jev], TypeSafe's "System One" decision model, instead. I described what spam looks like in plain language, asked Jev a yes/no question ([Noul][noul]) for each comment, and got a 0.922 ROC-AUC without collecting a single training example.
 
-> I didn't build the custom model, so I can't say how Jev compares to one. A model trained on my own comments might well be more accurate: it would learn the exact flavor of spam this blog attracts, and a 0.922 AUC leaves room to improve.
+I ended that post with a question I couldn't answer:
 
-This blog still only has a hundred comments, which is far too small to train a neural network. But I *do* have a dataset where I already built that exact model.
+> I didn't build the custom model, so I can't say how Jev compares to one. A model trained on my own comments might well be more accurate.
 
-A while ago, I wrote a two-part series on building a comment classifier from scratch—first [training a PyTorch model on cloud embeddings][pytorch], and then [running the entire pipeline client-side in the browser with ONNX and Transformers.js][onnx] using a smaller local embedding model (`all-MiniLM-L6-v2`). Later, I also experimented with an even simpler baseline on the same embeddings: skipping the neural network entirely and using a pure **$k$-Nearest Neighbors ($k$-NN)** classifier.
+The blog still has around a hundred comments, which isn't enough to train anything. But I've trained this kind of model before. In [an earlier post][onnx], I built a toxicity classifier for the [Jigsaw Toxic Comment Classification Challenge][jigsaw] dataset: generate an embedding for each comment, then train a small PyTorch network on top of the embeddings. That gives me labeled data, a training pipeline, and a model I already know how to build. So I ran Jev on the same comments and compared.
 
-Running all three approaches—a trained **PyTorch neural network**, **$k$-NN**, and **zero-shot Jev**—on that exact same dataset gives us a head-to-head benchmark across accuracy, data efficiency, latency, and running costs. Three results stood out immediately:
+The short version: a custom model does beat Jev, but by less than I expected, and it needs fewer labels to get there than I expected too. The choice of embedding model turned out to matter more than anything else in the comparison.
 
-1. **Jev does great out of the box, but needs threshold calibration.** With zero training examples, Jev achieves the highest ranking score of any approach (`0.967` Macro ROC-AUC across all six categories), beating models trained on 8,000 labeled comments. Yet at a naive `0.50` threshold its F1 score looks mediocre (`0.511`), because zero-shot probabilities judge semantics rather than the dataset's class balance. Calibrating the threshold (`0.95`) cuts false positives by **9.2x** and lifts `toxic` F1 to `0.706`.
-2. **$k$-NN is surprisingly good when data is abundant, but degrades rapidly when the training set is small.** With 8,000 training examples and strong classification embeddings, a 20-line $k$-NN classifier ($K=7$) with zero training time beats the trained PyTorch neural network on F1 (`0.805` vs. `0.784` on `toxic`, and `0.571` vs. `0.453` Macro F1). Shrink the training set below a few hundred examples, however, and $k$-NN hits a mathematical cliff—dropping to `0.000` F1 across every category at $N \le 25$.
-3. **For both PyTorch and $k$-NN, the embedding model matters far more than the classifier.** Switching from the 768-d cloud `CLASSIFICATION` embeddings to the smaller 384-d local `all-MiniLM-L6-v2` embeddings costs **16.2 F1 points** on the PyTorch MLP and **29.3 F1 points** on $k$-NN—and flips the winner between the two. In fact, **50 labeled examples** on the cloud embeddings (`0.692` F1) beat **8,000 labeled examples ($160\times$ more data)** on MiniLM (`0.622` F1).
+## The setup
 
----
+The dataset is the first 10,000 comments from the Jigsaw training set, which are Wikipedia talk page comments labeled by human raters. Each comment has six yes/no labels: `toxic`, `severe_toxic`, `obscene`, `threat`, `insult` and `identity_hate`. A comment can have any number of them. I split the comments into 8,000 for training and 2,000 for evaluation, and every number in this post comes from those same 2,000 comments.
 
-## The benchmark setup
+Toxic comments are rare, and some labels are very rare:
 
-The dataset comes from the [Kaggle Jigsaw Toxic Comment Classification Challenge][jigsaw], using the same [10,000-comment subset and code][repo] from my earlier PyTorch posts. Each Wikipedia talk-page comment is labeled across **six binary toxicity categories** (a single comment can belong to none, one, or several at once):
+| Label | Positives in the 2,000 evaluation comments |
+|---|---|
+| `toxic` | 185 (9.3%) |
+| `insult` | 95 (4.8%) |
+| `obscene` | 89 (4.5%) |
+| `severe_toxic` | 20 (1.0%) |
+| `identity_hate` | 13 (0.7%) |
+| `threat` | 6 (0.3%) |
 
-| Category | Positive examples in validation (`n = 2,000`) | Base rate |
-|---|---|---|
-| `toxic` | 185 | 9.25% |
-| `insult` | 95 | 4.75% |
-| `obscene` | 89 | 4.45% |
-| `severe_toxic` | 20 | 1.00% |
-| `identity_hate` | 13 | 0.65% |
-| `threat` | 6 | 0.30% |
-| **Clean (all zeros)** | **1,805** | **90.25%** |
-
-Using a fixed random seed (`seed = 1`), the 10,000 comments are split **80/20** into **8,000 training comments** and **2,000 validation comments** (`12,000` binary decisions in total).
+Most of the numbers in this post are for `toxic`. It's the broadest label, the closest to the single yes/no question in my spam filter, and with 185 examples it's the only one large enough to measure precisely. I come back to the other labels later.
 
 > [!NOTE]
-> Because `90.25%` of the comments are completely clean (`96.60%` of all `12,000` individual label cells are `0`), **raw accuracy is a trap**. A dummy classifier that predicts `0` for everything achieves **96.60% element-wise accuracy** while catching `0%` of toxic comments. Throughout this post, we focus on **ROC-AUC** (how well a model ranks toxic comments above clean ones across all thresholds) and **F1 / Precision / Recall** on the positive class.
+> In the original post, I reported that the model reached 98% accuracy. That number is less impressive than it sounds: since 96.6% of all the labels in the evaluation set are "no", a model that always answers "no" gets 96.6% accuracy while catching nothing. This post uses metrics that only reward finding the toxic comments.
 
-For the two embedding-based approaches, we test both embedding models from the original series:
+I compared three approaches:
 
-- **Cloud classification embeddings (`768d`)**: Google AI's embedding API (`task_type="CLASSIFICATION"`, 768 dimensions), matching the first post.
-- **Local browser-friendly embeddings (`384d`)**: [`sentence-transformers/all-MiniLM-L6-v2`][minilm] (384 dimensions), the compact model that runs locally on CPU or in the browser via Transformers.js.
+- **A small neural network**, a multilayer perceptron (MLP), trained on the 8,000 labeled comments. It's the same model from the earlier post.
+- **k-nearest neighbors (k-NN)**, which doesn't train at all. It classifies a comment by looking at the 7 most similar labeled comments.
+- **Jev**, which never sees the training data. Each comment is sent with six Noul questions, one per label, and Jev returns six probabilities. The questions follow the same pattern as the spam filter: an instruction plus a description of what counts as "yes" and as "no". For example, `toxic` is "rude, disrespectful, hostile, abusive, profane, insulting, threatening, or hateful language directed at another person or group", while civil disagreement and criticism of an edit is not. The full text of all six questions is in [the repository][questions].
 
-Here are the three contenders:
+> [!NOTE]
+> If you haven't worked with these before, here's how the MLP and k-NN work. Both start from **embeddings**. An embedding model turns a piece of text into a list of numbers, called a vector, so that texts with similar meanings get similar vectors. You can picture each comment as a point in space, where nearby points are comments that say similar things.
+>
+> - **k-NN** uses that space directly. To classify a new comment, it finds the *k* labeled comments closest to it and lets them vote. With 7 neighbors, if 4 of them are labeled toxic, the new comment gets a toxic score of 4/7, or 0.57. There's no training step: the labeled comments *are* the model.
+> - **An MLP** is the simplest kind of neural network: a few layers that each combine the numbers coming in using a set of weights, apply a simple function, and pass the result on to the next layer. Training shows it the embeddings of the labeled comments over and over, adjusting the weights a little each time until its outputs match the labels. Once trained, it only needs those weights, not the labeled comments, and it can learn which parts of the embedding matter for the task.
 
-1. **Custom PyTorch MLP (`ToxicityModel`)**: A 3-layer feed-forward network (`D -> 128 -> ReLU -> 64 -> ReLU -> 6`) trained with `BCEWithLogitsLoss` and `Adam` (`lr = 0.0001`, `batch_size = 512`, `100` epochs on 768-d cloud embeddings / `150` epochs on 384-d MiniLM).
-2. **Pure $k$-NN ($K = 7$)**: No neural network and no training loop. To classify a comment, we compute the Euclidean distance from its embedding to all $N$ training embeddings, find the $K = 7$ closest neighbors, and average their labels (`m / 7` for each of the 6 categories). A category is predicted positive at `>= 0.50` when at least 4 of the 7 neighbors have that label.
-3. **Jev (`System One`, Zero-Shot)**: Jev never sees the 8,000 training rows. For each validation comment, we send the comment text as JSON state (`{"comment": {"text": "…"}}`) and ask **six `Noul` questions in a single request**—one per Jigsaw category—returning six probabilities between `0.0` and `1.0`.
+The MLP and k-NN both need an embedding for each comment, so I tried each of them with two embedding models:
 
----
+- **Cloud embeddings:** Google's `gemini-embedding-001` with the `CLASSIFICATION` task type, truncated to 768 dimensions, or 768 numbers per comment. This is an API call per comment.
+- **MiniLM embeddings:** [`all-MiniLM-L6-v2`][minilm], a small model that produces 384 numbers per comment and runs locally, even in the browser. It's the model from the earlier post.
 
-## Overall results at full training size (`N = 8,000`)
+That's five configurations: the MLP and k-NN on each embedding model, plus Jev.
 
-Here is how all five configurations compare across the 2,000 validation comments:
+In the rest of this post, I'll call the MLP and k-NN the **custom models**. Only the MLP is trained, but both are built from the labeled comments, while Jev only gets my questions.
 
-| Approach | Training rows | Element accuracy | Macro ROC-AUC (6 labels) | `toxic` ROC-AUC | `toxic` F1 | `toxic` Precision / Recall | Macro F1 (6 labels) |
-|---|---|---|---|---|---|---|---|
-| *All-zeros baseline* | *0* | *96.60%* | *0.500* | *0.500* | *0.000* | *0.0% / 0.0%* | *0.000* |
-| **PyTorch MLP (Cloud 768d)** | 8,000 | **98.28%** | 0.965 | 0.958 | 0.784 | 83.4% / 74.1% | 0.453 |
-| **PyTorch MLP (Local MiniLM 384d)** | 8,000 | 97.78% | 0.902 | 0.919 | 0.622 | 82.9% / 49.7% | 0.324 |
-| **$k$-NN $K=7$ (Cloud 768d)** | 8,000 | 98.19% | 0.956 | 0.963 | **0.805** | 84.5% / 76.8% | **0.571** |
-| **$k$-NN $K=7$ (Local MiniLM 384d)** | 8,000 | 97.27% | 0.827 | 0.863 | 0.512 | 76.0% / 38.6% | 0.294 |
-| **Jev Zero-Shot (`threshold = 0.50`)** | **0** | 92.95% | **0.967** | **0.966** | 0.511 | 34.7% / **96.8%** | 0.369 |
-| **Jev Zero-Shot (`threshold = 0.95`)** | **0** | 97.70% | **0.967** | **0.966** | 0.706 | 76.6% / 65.4% | 0.431 |
+## Ranking comments: a tie that isn't quite a tie
 
-![ROC curves on the toxic category across all five models](/images/roc-curves.png)
-*Figure 1: ROC curves on the primary `toxic` category (2,000 validation comments), with both `toxic` AUC and 6-category Macro AUC in the legend. Zero-shot Jev (`0.966` toxic AUC, `0.967` Macro AUC) matches or beats the models trained on 8,000 examples.*
+The first question is whether each approach scores toxic comments higher than clean ones. That doesn't need a threshold, so it's the fairest comparison to start with.
 
-Look at the **Macro ROC-AUC** column first. Without a single training example, **Jev achieves the highest ranking performance in the entire benchmark (`0.967` Macro ROC-AUC, and `0.981` Micro ROC-AUC)**, edging out both the PyTorch MLP (`0.965`) and $k$-NN (`0.956`) trained on 8,000 cloud embeddings, and beating the local MiniLM models (`0.902` and `0.827`) by a wide margin.
+> [!NOTE]
+> Two metrics describe how well a classifier ranks:
+>
+> - **ROC-AUC** is the chance that a random toxic comment scores higher than a random clean one. Here, a random guess scores 0.5.
+> - **Average precision** measures how clean the *top* of the ranking is: if you go down the list from the highest score, how many of the comments you pass are actually toxic? Here, a random guess scores 0.09, the share of toxic comments.
+>
+> When positives are rare, ROC-AUC can look great even when the top of the list is full of mistakes, because there are so many clean comments to rank below. Average precision doesn't hide that.
 
-So why does Jev's uncalibrated `threshold = 0.50` row show `92.95%` accuracy and a `0.511` F1 score? That brings us to the first big takeaway.
+![Ranking quality on the toxic label for all five configurations, measured with ROC-AUC and average precision](/images/ranking-quality.png)
+*Figure 1: How well each approach ranks toxic comments above clean ones on the `toxic` label. Each line is a 95% bootstrap interval. Jev ties the custom models built on cloud embeddings on ROC-AUC, but trails them on average precision.*
 
----
+On ROC-AUC, Jev scores 0.97 and both models trained on cloud embeddings score 0.96. The differences are well inside the intervals, so this is a three-way tie. That's still remarkable for a model that has never seen this dataset.
 
-## Takeaway 1: Jev does great, but needs calibration
+Average precision tells a different story. The MLP on cloud embeddings reaches 0.85, k-NN 0.83, and Jev 0.79. The gap between Jev and the MLP is real: in a paired bootstrap, the MLP comes out ahead in more than 99% of resamples. Both custom models put fewer clean comments among their most confident predictions.
 
-When you train a PyTorch model with binary cross-entropy (`BCEWithLogitsLoss`) on 8,000 comments from a dataset where `90.75%` of comments are clean, the model learns **two things at once**:
+Both models on MiniLM embeddings trail Jev on every metric, by a wide margin.
 
-1. **What toxicity looks like** (ranking comments from least to most toxic).
-2. **How rare toxicity is in this specific dataset** (the base rate, or class prior).
+## A probability isn't a decision
 
-Because fewer than 1 in 10 comments in Jigsaw are labeled `toxic`, the trained MLP pushes its output probabilities down unless the evidence is overwhelming. By the time training finishes, a `0.50` probability cutoff naturally aligns with the dataset's annotator boundary (`83.4%` precision, `74.1%` recall, `1.6%` false positive rate).
+Ranking is only half the job. To act on a comment, I need a threshold, and that's where the first surprise from the spam post shows up again.
 
-**Jev has never seen the dataset.** It doesn't know whether `1%` or `80%` of Wikipedia talk-page comments are toxic. When you ask Jev a `Noul` question, it evaluates the **semantics of the comment against your criteria**. If a Wikipedia editor writes a snarky, abrasive reply during an edit war—*"Oh, stop crying and read the source before reverting, you have no clue what you're talking about"*—human Jigsaw annotators frequently marked it `0` (not toxic enough to cross their moderation bar), whereas Jev reasonably assigns a `0.60` or `0.80` probability that the comment is rude or disrespectful.
+![Distribution of Jev's toxic scores for comments labeled toxic and comments labeled clean](/images/jev-scores.png)
+*Figure 2: Jev's `toxic` score for every evaluation comment, split by how the raters labeled it. Toxic comments pile up near 1.0, while clean comments have a long, thin tail that reaches all the way up.*
 
-![Threshold calibration sweep comparing zero-shot Jev and the trained PyTorch MLP](/images/threshold-calibration.png)
-*Figure 2: Precision, recall, F1 score, and false positive rate on `toxic` as the decision threshold moves from `0.10` to `0.98`. The trained PyTorch MLP (right) has the dataset's `9.3%` base rate baked into its weights, so `F1` peaks near `0.50`. Zero-shot Jev (left) reaches `96.8%` recall at `0.50` with an `18.6%` false positive rate, and peaks at `0.95`.*
+That tail is the problem. Most clean comments score close to 0, but there are so many of them that even a thin tail adds up to hundreds of comments above 0.5.
 
-Here is what happens to Jev on the `toxic` category (`185` toxic, `1,815` clean comments) as we raise the threshold:
+![Precision, recall and F1 for Jev on the toxic label as the threshold moves from 0.3 to 0.99](/images/jev-threshold.png)
+*Figure 3: Jev's precision, recall and F1 on the `toxic` label as the threshold changes. At the default 0.5, it catches 97% of toxic comments, but only 35% of what it flags is labeled toxic. F1 peaks around 0.92.*
 
-| Jev threshold | True positives (`185`) | False positives (`1,815`) | Precision | Recall | F1 score | False positive rate | Element accuracy (all 6 labels) |
-|---|---|---|---|---|---|---|---|
-| `0.50` | 179 | 337 | 0.35 | **0.97** | 0.51 | 0.186 | 92.95% |
-| `0.70` | 174 | 258 | 0.40 | 0.94 | 0.56 | 0.142 | 94.37% |
-| `0.80` | 164 | 158 | 0.51 | 0.89 | 0.65 | 0.087 | 96.08% |
-| `0.90` | 140 | 69 | 0.67 | 0.76 | 0.71 | 0.038 | 97.32% |
-| **`0.95`** | **121** | **37** | **0.77** | **0.65** | **0.71** | **0.020** | **97.70%** |
-| `0.98` | 84 | 5 | **0.94** | 0.45 | 0.61 | **0.003** | **97.84%** |
+| Threshold | Toxic flagged (of 185) | Clean flagged (of 1,815) | Precision | Recall | F1 |
+|---|---|---|---|---|---|
+| 0.5 | 179 | 337 | 0.35 | 0.97 | 0.51 |
+| 0.8 | 163 | 156 | 0.51 | 0.88 | 0.65 |
+| 0.9 | 140 | 73 | 0.66 | 0.76 | 0.70 |
+| 0.95 | 121 | 37 | 0.77 | 0.65 | 0.71 |
+| 0.98 | 84 | 5 | 0.94 | 0.45 | 0.61 |
 
-Moving Jev's threshold from `0.50` to `0.95` eliminates **9 out of 10 false positives** (`337` down to `37`), cuts the false positive rate from `18.6%` to `2.0%`, and raises `toxic` F1 from `0.511` to `0.706`—passing the local MiniLM PyTorch model (`0.622`) and local MiniLM $k$-NN (`0.512`) without using a single training example. If you want high-precision auto-moderation (`threshold = 0.98`), precision hits **94.4%** with a **0.3%** false positive rate (`5` false positives out of `1,815` clean comments).
+At 0.5, Jev flags 337 comments the raters labeled as clean. The custom models don't have this problem: their scores come from the labels, so they already reflect how rare toxicity is in this dataset and how strict the raters were, and their 0.5 sits in a sensible place. Jev only knows what my question says.
+
+I wanted to know whether those 337 comments were Jev being wrong or Jev being stricter than the raters, so I read the 37 that Jev was most confident about, all scoring 0.95 or higher. By my count, about two-thirds of them are plainly hostile. A few examples, all labeled clean:
+
+- "OMG, you are an imbecile."
+- "You are clearly not very smart and not here to build an encyclopedia."
+- "Stay off my talk page, stalker."
+- A message telling an administrator it "is not difficult to learn precisely who in that real world the coward is behind the loud account", which reads as a veiled threat.
+
+Five of the 37 have one of the other labels, such as `insult`, but not `toxic`, so the dataset contradicts itself on those. The rest are mostly heated arguments that could go either way, plus a few real mistakes, like a polite request to unblock a user. On the other side, the toxic-labeled comments Jev scored lowest include a barnstar thanking an editor for fighting vandalism, and a suggestion to add a "Mobile porn" link to an article.
 
 > [!TIP]
-> **Zero-shot doesn't mean zero data.** You don't need 8,000 labeled rows to train Jev, but you *do* want 50 to 100 labeled examples to calibrate its threshold. That small evaluation set is what bridges the gap between "is this semantically rude?" and "where does my application draw the line?"
+> Precision measured against human labels caps out at how consistent those labels are. A model built from labels learns the raters' habits, including their mistakes. Jev applies the definition you wrote. When the two disagree, it's worth reading the disagreements before deciding which one is wrong.
 
----
+None of that excuses picking the threshold by hand, though. In the spam post, I chose a threshold by looking at all my labeled comments. Doing that here would be cheating, because I'd be choosing Jev's threshold using the same 2,000 comments I'm grading it on, while holding the custom models to 0.5. So for a fair comparison, every approach gets the same treatment: pick the threshold with the best F1 on a random half of the evaluation comments, measure F1 on the other half, and average over 300 random splits.
 
-## Takeaway 2: $k$-NN is surprisingly strong—until the training set is small
+| Approach | `toxic` F1 | Average F1, all six labels |
+|---|---|---|
+| k-NN, cloud embeddings | **0.80** | **0.57** |
+| MLP, cloud embeddings | 0.77 | 0.54 |
+| Jev | 0.70 | 0.51 |
+| MLP, MiniLM embeddings | 0.65 | 0.43 |
+| k-NN, MiniLM embeddings | 0.55 | 0.39 |
 
-The second surprise in the full-dataset table is **$k$-NN ($K = 7$) on the 768-d cloud embeddings**. With zero training time and no learned weights—just Euclidean distance and a 7-neighbor vote—it achieves:
+With 8,000 labeled examples and good embeddings, both custom models beat Jev. Without good embeddings, neither does.
 
-- **The highest `toxic` F1 score in the benchmark (`0.805`)**, beating the PyTorch MLP (`0.784`).
-- **The highest Macro F1 across all 6 categories (`0.571` vs. PyTorch's `0.453`)**.
+## Beyond the toxic label
 
-Why does a simple nearest-neighbor lookup beat a trained neural network at $N = 8,000$? Look at the per-category breakdown:
+`toxic` is also the label where the custom models look best: it's the most common one, so they have the most examples to learn from. Two other labels have enough examples, about 90 each, to be worth checking:
 
-![Per-category ROC-AUC and F1 score across all six toxicity labels](/images/per-category-f1.png)
-*Figure 3: Per-category ROC-AUC (left) and hard-decision F1 score (right), ordered from the most common label (`toxic`, `n=185`) to the rarest (`threat`, `n=6`). At $N = 8,000$, $k$-NN's local neighborhood voting beats the PyTorch MLP on rare categories.*
-
-In a multi-label dataset with extreme class imbalance (`identity_hate` is `0.65%` of comments; `threat` is `0.30%`), a global MLP trained with standard binary cross-entropy learns to be conservative on rare labels because predicting `0` is right `99.7%` of the time. On `threat`, the MLP achieves a `0.890` ROC-AUC (it ranks threats high relative to clean comments), but none of its probabilities cross `0.50`, resulting in **`0.000` F1**. On `identity_hate`, the MLP reaches `0.353` F1.
-
-$k$-NN doesn't optimize a global loss function. Even if racial slurs or death threats represent only `0.5%` of the dataset, `0.5%` of 8,000 training comments is still **25 to 50 examples** clustered tightly together in embedding space. When a new `identity_hate` comment lands in that neighborhood, 4 or 5 of its 7 nearest neighbors share that label, triggering a positive vote (`0.636` F1 on `identity_hate`, `0.286` F1 on `threat`).
-
-### The small-data cliff
-
-That local voting mechanism has a catch: **what happens when you don't have 8,000 labeled examples yet?**
-
-To find out, I ran a training set size sweep across $N \in \{15, 25, 50, 100, 250, 500, 1000, 2000, 4000, 8000\}$, training the PyTorch MLP and indexing $k$-NN ($K = 7$) on the first $N$ training comments and evaluating on the same 2,000 validation comments:
-
-![Training set size sweep from N=15 to N=8,000 comparing PyTorch, k-NN, and zero-shot Jev](/images/data-efficiency.png)
-*Figure 4: `toxic` F1 score (left) and 6-category Macro ROC-AUC (right) as the labeled training set grows from 15 to 8,000 comments (log scale), compared against zero-shot Jev (`0` training rows).*
-
-| Training set size ($N$) | Toxic rows in train set | $k$-NN $K=7$ (Cloud 768d) `toxic` F1 | $k$-NN $K=7$ (Local MiniLM) `toxic` F1 | PyTorch MLP (Cloud 768d) `toxic` F1 | PyTorch MLP (Local MiniLM) `toxic` F1 | $k$-NN active labels (`F1 > 0` of 6) |
-|---|---|---|---|---|---|---|
-| **0 (Jev @ `0.95`)** | **0** | — *(Jev: **0.706**)* | — *(Jev: **0.706**)* | — *(Jev: **0.706**)* | — *(Jev: **0.706**)* | *Jev: 5 / 6 (6 / 6 @ `0.85`)* |
-| **15** | 1 | **0.000** | **0.000** | 0.573 | 0.171 | **0 / 6** |
-| **25** | 1 | **0.000** | **0.000** | 0.205 | 0.165 | **0 / 6** |
-| **50** | 5 | 0.644 | 0.123 | 0.692 | 0.171 | **1 / 6** |
-| **100** | 10 | 0.761 | 0.165 | 0.731 | 0.235 | **3 / 6** (MiniLM: **2 / 6**) |
-| **250** | 26 | 0.784 | 0.405 | 0.775 | 0.329 | 4 / 6 (MiniLM: 3 / 6) |
-| **500** | 51 | 0.786 | 0.400 | 0.766 | 0.388 | 4 / 6 |
-| **1,000** | 95 | **0.811** | 0.449 | 0.749 | 0.442 | 4 / 6 |
-| **8,000** | 773 | **0.805** | 0.512 | 0.784 | 0.622 | **6 / 6** (MiniLM: 4 / 6) |
-
-Look at what happens at the bottom of the table:
-
-1. **The $\lceil K/2 \rceil$ threshold cliff**: For $k$-NN with $K = 7$ to output a probability `>= 0.50`, at least **4 of the 7 nearest neighbors** must be positive (`4 / 7 = 0.571`). At $N = 15$ and $N = 25$, the training split only contains **1 toxic comment** in total. It is **mathematically impossible** for $k$-NN ($K = 7$) to ever predict `1`—resulting in **0.0% recall and `0.000` F1 across all 6 categories**.
-2. **Rare categories stay dead until $N$ is huge**: Even at $N = 50$ (`5` toxic comments in the training set), `5 out of 6` toxicity categories (`severe_toxic`, `obscene`, `threat`, `insult`, `identity_hate`) have fewer than 4 positive examples in the entire training set and score **`0.000` F1**. At $N = 100$ (comparable to my blog's 102 comments), half of the categories (`3 of 6` on cloud embeddings, `4 of 6` on local MiniLM) still have `0.000` F1, and local MiniLM $k$-NN catches only **9.2%** of `toxic` comments (`0.165` F1).
-3. **Can you fix small-$N$ $k$-NN by lowering $K$?** I also swept $K \in \{1, 3, 5, 7, 11, 15, 21, 31\}$. Lowering $K$ to `1` or `3` allows $k$-NN to fire when only 1 or 2 positive examples exist, but at $N = 25$ (`1` positive example), $K = 1$ only reaches `0.214` F1 (`0.123` on MiniLM) because a single isolated vector cannot cover the many ways people write toxic comments. Conversely, at $N = 8,000$, $K = 1$ drops `toxic` F1 from `0.805` down to `0.713` because single-neighbor decisions are noisy.
-
----
-
-## Takeaway 3: The embedding model matters more than the classifier
-
-Looking across both the PyTorch MLP and $k$-NN curves in Figure 4, another pattern jumps out: **the gap between the two embedding models (solid vs. dashed lines) is much larger than the gap between the two classifier architectures (blue vs. orange lines).**
-
-![Comparison of Cloud 768d embeddings vs Local MiniLM 384d embeddings across PyTorch MLP and k-NN](/images/embedding-comparison.png)
-*Figure 5: Left: Per-category F1 score at $N = 8,000$ comparing the 768-d cloud `CLASSIFICATION` embeddings (solid bars) against the 384-d local `all-MiniLM-L6-v2` embeddings (hatched bars). Right: `toxic` F1 across dataset sizes—8,000 training examples on MiniLM 384d lose to just 50 training examples on Cloud 768d.*
-
-Here is the head-to-head drop when switching from the 768-d cloud embeddings to the 384-d local `all-MiniLM-L6-v2` embeddings at $N = 8,000$:
-
-| Category (`n` in val) | PyTorch MLP (`768d`) | PyTorch MLP (`384d` MiniLM) | MLP $\Delta$ F1 | $k$-NN $K=7$ (`768d`) | $k$-NN $K=7$ (`384d` MiniLM) | $k$-NN $\Delta$ F1 |
-|---|---|---|---|---|---|---|
-| `toxic` (`185`) | 0.784 | 0.622 | **-0.162** | **0.805** | 0.512 | **-0.293** |
-| `obscene` (`89`) | **0.800** | 0.726 | -0.074 | 0.744 | 0.453 | **-0.291** |
-| `insult` (`95`) | 0.684 | 0.596 | -0.088 | **0.745** | 0.471 | **-0.274** |
-| `identity_hate` (`13`) | 0.353 | 0.000 | **-0.353** | **0.636** | 0.235 | **-0.401** |
-| `severe_toxic` (`20`) | 0.095 | 0.000 | -0.095 | **0.207** | 0.095 | -0.112 |
-| `threat` (`6`) | 0.000 | 0.000 | 0.000 | **0.286** | 0.000 | **-0.286** |
-| **6-label Macro F1** | 0.453 | 0.324 | **-0.129** | **0.571** | 0.294 | **-0.277** |
-| **6-label Macro ROC-AUC** | **0.965** | 0.902 | -0.063 | 0.956 | 0.827 | **-0.129** |
-
-Three things are happening under the hood:
-
-1. **Embedding quality beats $160\times$ more training data.** With the 768-d cloud `CLASSIFICATION` embeddings, training on just **50 labeled comments** gives a `0.692` `toxic` F1 on the PyTorch MLP and `0.644` on $k$-NN (climbing to `0.761` at $N = 100$). With `all-MiniLM-L6-v2`, training on **all 8,000 comments** tops out at `0.622` on the MLP and `0.512` on $k$-NN. No amount of classifier tuning or extra training rows can recover signal that the embedding model threw away.
-2. **Task-tuned classification embeddings vs. general topic similarity.** `all-MiniLM-L6-v2` is a compact 22M-parameter model trained to group sentences by **subject matter and paraphrase similarity**. In that space, a polite disagreement about an article on politics and a personal attack about the same article share topic vocabulary and land near each other. Google's larger embedding model, called with `task_type="CLASSIFICATION"`, warps the vector space around **tone, sentiment, and classification boundaries** rather than just topic—so hostile comments cluster together regardless of whether the discussion is about history, sports, or Wikipedia formatting.
-3. **Why the winner flips (`k-NN > MLP` on 768d, but `MLP > k-NN` on MiniLM 384d).** Notice that $k$-NN suffers nearly **twice the F1 loss (`-29.3` points on `toxic`)** of the PyTorch MLP (`-16.2` points) when moving to MiniLM. That's because **$k$-NN treats all 384 dimensions equally** when computing Euclidean distance: if 350 dimensions encode *topic* and only a few dozen encode *hostility*, a comment's 7 nearest neighbors in MiniLM space are comments on the *same topic*, not comments with the *same toxicity*. The PyTorch MLP, by contrast, has a learned input layer (`384 -> 128`) that learns to zero out the topic dimensions and amplify the toxicity dimensions—recovering `11` F1 points on `toxic` (`0.622` vs. `0.512`) and `27` F1 points on `obscene` (`0.726` vs. `0.453`).
-
----
-
-## Performance and running costs
-
-Accuracy and F1 are only half the story. In production, these three approaches have very different latency profiles, memory footprints, and cost structures.
-
-![Single-comment end-to-end latency and classifier memory footprint scaling](/images/performance-and-cost.png)
-*Figure 6: Left: Median single-comment end-to-end latency decomposed into the embedding step (blue) and the classifier/decision step (green). Right: Classifier memory footprint in RAM as the labeled dataset grows from 15 to 8,000 examples.*
-
-### 1. Training time and inference latency
-
-In a real web application, comments arrive **one at a time** when a user clicks Submit. For the two embedding-based models, classifying a comment is a two-step pipeline: first generate the vector embedding, then run the classifier (`MLP` or `$k$-NN`).
-
-Here is what we measured on a Mac (Apple Silicon CPU + HTTPS calls for cloud APIs):
-
-| Pipeline | Training / build time (`N = 8,000`) | Embedding latency (1 comment, median) | Classifier latency (1 comment, median) | **Total end-to-end latency (median)** | Classifier RAM / weights size |
-|---|---|---|---|---|---|
-| **Local MiniLM (384d) + PyTorch MLP** | 7.3 s (150 epochs) + ~15 s embed | 9.18 ms (local CPU) | **0.04 ms** (`0.001 ms` batched) | **9.2 ms** | **196 KB** (`.safetensors`) + ~90 MB MiniLM |
-| **Local MiniLM (384d) + $k$-NN ($K=7$)** | 0 s + ~15 s embed | 9.18 ms (local CPU) | 1.71 ms (`0.014 ms` batched) | **10.9 ms** | **11.7 MB** (`8k × 384` float32) + ~90 MB MiniLM |
-| **Jev (`jev-1.13.0`, 6 `Noul` questions)** | **0 s** | *None* | **195.0 ms** (`p10: 182 ms, p90: 224 ms`) | **195.0 ms** | **0 KB** |
-| **Cloud Embedding (768d) + PyTorch MLP** | 8.6 s (100 epochs) + API embed | 260.8 ms (HTTPS API) | 0.05 ms (`0.002 ms` batched) | **260.9 ms** | **388 KB** (`.safetensors`) |
-| **Cloud Embedding (768d) + $k$-NN ($K=7$)** | 0 s + API embed | 260.8 ms (HTTPS API) | 3.72 ms (`0.018 ms` batched) | **264.5 ms** | **23.4 MB** (`8k × 768` float32) |
-
-Three practical engineering details jump out from those numbers:
-
-- **Once you make a network call, the local classifier time is invisible.** Running the PyTorch MLP takes `0.05 ms` (`50 microseconds`), and searching `8,000` vectors in $k$-NN takes `3.7 ms`. Yet if you call a cloud API to generate the 768-d embedding first, the HTTPS round-trip takes `~261 ms`—meaning **calling Jev directly (`195 ms` median for all 6 toxicity questions at once) is actually faster end-to-end than calling a cloud embedding API + a local model**.
-- **If you need sub-10ms synchronous latency or browser execution, local MiniLM + MLP is unbeatable.** Running `all-MiniLM-L6-v2` locally with the `196 KB` MLP classifies a comment in **`9.2 ms`** with zero external API calls, and can run entirely inside the user's browser via ONNX Runtime Web and Transformers.js.
-- **$k$-NN's memory and compute scale linearly $O(N)$ with your dataset.** The PyTorch MLP compresses 8,000 training comments into `388 KB` of weights (`99,206` parameters), and its latency (`0.05 ms`) never changes whether you trained on 100 rows or 10 million rows. $k$-NN *is* the training set: at $N = 8,000$ (768d), you must keep **23.4 MB** of raw vectors in memory (or **~467 MB** for the full 159,571-row Jigsaw dataset) and compute distances against all of them—or stand up a vector database / HNSW index.
-
-### 2. Running costs vs. upfront cost
-
-How much does each approach cost to run?
-
-| Cost dimension | Local MiniLM + PyTorch / $k$-NN | Cloud Embedding + PyTorch / $k$-NN | Jev (`System One`) |
+| Label and metric | Jev | MLP, cloud | k-NN, cloud |
 |---|---|---|---|
-| **Upfront data cost** | High (`1,000–8,000+` labeled examples) | High (`1,000–8,000+` labeled examples) | **Near zero** (`0` to start; `~50–100` to calibrate threshold) |
-| **Pipeline & infra to maintain** | Training script, ONNX/safetensors export, bundling ~23–90 MB embedding model | Training script, API key, model weights or `23+ MB` vector index in RAM / DB | **1 stateless HTTP call** (`POST /v1/systemone`) |
-| **Tokens per comment** | **0 API tokens** | **~75 input tokens** (comment text only, 0 output tokens) | **~946 input + 111 output tokens** (6 toxicity questions)<br>*(or ~280 input + 18 output tokens for 1 spam question)* |
-| **Tokens per 1,000 comments** | **0** | **~75,000 input tokens** | **~1.06M tokens** (6 questions) / **~300k tokens** (1 question) |
-| **Adapting to new rules** | Relabel dataset + retrain + redeploy | Relabel dataset + retrain (or re-index) | **Edit the `Noul` criteria string in code** |
+| `toxic`, average precision | 0.79 | 0.85 | 0.83 |
+| `toxic`, F1 with a fair threshold | 0.70 | 0.77 | 0.80 |
+| `obscene`, average precision | 0.85 | 0.87 | 0.81 |
+| `obscene`, F1 with a fair threshold | 0.74 | 0.79 | 0.75 |
+| `insult`, average precision | 0.63 | 0.75 | 0.77 |
+| `insult`, F1 with a fair threshold | 0.63 | 0.70 | 0.73 |
 
-Across all 2,000 validation comments (12,000 binary judgments across 6 categories), Jev consumed **`1,891,010` input tokens and `222,000` output tokens**—an average of **`945.5` input tokens and `111.0` output tokens per comment** (`18.5` output tokens per `Noul` question). Most of those input tokens (~870 tokens) are the six category definitions and `true`/`false` criteria repeated on every call; for a single-question classifier like my blog's spam filter, a call is under 300 tokens total.
+![Average precision for Jev, the MLP and k-NN on the toxic, obscene and insult labels](/images/per-label.png)
+*Figure 4: Average precision on the three labels with enough examples to measure. Jev is close to the custom models on `obscene`, but well behind on `insult`.*
 
-That token profile defines the economic trade-off clearly:
+On `obscene`, Jev is roughly level with the custom models. Swear words and sexual language are easy to recognize without seeing any examples.
 
-- **At high volume (hundreds of thousands or millions of comments a day)**, calling a zero-shot decision model on every comment adds up to hundreds of millions of tokens, and you almost certainly *already have* thousands of historical examples. At that scale, **Cloud Embeddings + $k$-NN / PyTorch** (which only sends ~75 tokens of raw comment text per call, ~14x fewer tokens than a 6-question Jev prompt) or **Local MiniLM + PyTorch** (`$0` API cost, `9.2 ms` latency) will pay back the engineering investment of training a model within days.
-- **At low-to-medium volume (a personal blog, an internal tool, a startup MVP, or an async background moderation job)**, the API bill for a few hundred or a few thousand comments a month is pennies. In those systems, **the dominant cost isn't tokens—it's engineering time and labeled data**. Collecting and manually labeling 8,000 comments costs orders of magnitude more than the API calls ever will.
+On `insult`, Jev falls clearly behind, for the same reason as in the threshold section, only stronger. Jev scored 112 comments at 0.9 or higher for `insult` that the raters didn't label as insults. Almost half of them, 51, are labeled `toxic`, and many are personal attacks by any reading: "Man, you are really a dishonest person, disgusting!!!!", or "How primitive are you Are you from a nursery school?" Meanwhile, Jev scored all but one of the 95 comments the raters did call insults above 0.5. The raters used `insult` for a narrower set of comments than my question describes, and the custom models learned that narrower definition from the labels.
 
----
+That's a useful reminder of what a zero-shot model is measured against. When my definition and the dataset's agree, as with `obscene`, Jev comes close to models built from 8,000 labels. When they don't, I'd need to either rewrite the question to match the raters, or accept that Jev is answering a slightly different question.
 
-## Which one should you pick?
+The other three labels are too small to compare: with 20, 13 and 6 examples, a single comment moves the scores by several points.
 
-Putting all three experiments together gives a straightforward decision rule based on how much labeled data you have and how many requests you serve:
+## How many labels does each approach need?
 
-1. **You have `0` to `250` labeled examples (Cold Start / Low Volume):**
-   **Use [Jev][jev] (`System One`) and calibrate its threshold.** Neither PyTorch nor $k$-NN can learn rare categories from a few dozen examples, and $k$-NN hits a hard `0.000` F1 cliff when positive examples drop below $\lceil K/2 \rceil$. Jev gives you `0.967` Macro ROC-AUC on day one, and once you have 50–100 labeled examples to tune the probability threshold (`0.85`–`0.95`), you get strong precision and recall without maintaining a training pipeline.
-2. **You have `1,000+` labeled examples and want the simplest high-accuracy backend classifier:**
-   **Use $k$-NN ($K = 7$) on task-tuned cloud embeddings (`task_type="CLASSIFICATION"`).** If your dataset fits comfortably in memory (`~23 MB` for 8,000 rows), $k$-NN requires zero training time, handles rare multi-label categories better than a basic MLP (`0.571` vs. `0.453` Macro F1), and reaches the highest F1 score in our benchmark (`0.805`).
-3. **You need `< 10 ms` latency, zero marginal API cost, or full client-side execution in the browser:**
-   **Train a small PyTorch MLP on local embeddings (`all-MiniLM-L6-v2`) and export to ONNX.** You trade some accuracy (`0.902` Macro AUC vs. `0.965` with cloud embeddings) for a `196 KB` classifier that runs in `9.2 ms` on CPU or directly inside the user's browser with zero server or token costs.
+A model trained on 8,000 labels beating one trained on none isn't a fair fight. The real question for a project like my blog is what happens with fewer labels.
 
-For my blog's comment queue—where volume is measured in dozens of comments, moderation runs asynchronously in a background task after the HTTP response, and collecting 8,000 spam examples would take decades—that cold-start curve confirms why skipping the custom model was the right call.
+So I rebuilt the custom models from smaller random subsets of the labeled data, from 15 to 8,000 comments, ten times each. For Jev, the labels don't train anything, but they are still useful: they're what I use to pick the threshold. So for each budget, I picked Jev's threshold using that many labeled comments and measured F1 on the rest. The custom models use the default 0.5 threshold.
+
+![F1 on the toxic label as the number of labeled examples grows, for Jev, the MLP and k-NN on cloud embeddings](/images/labels-needed.png)
+*Figure 5: `toxic` F1 as the number of labeled comments grows, on a log scale. For Jev, the labels are only used to pick the threshold. For the MLP and k-NN, they are the training set. Shaded areas show the range between the 10th and 90th percentile across random subsets.*
+
+| Labeled comments | Toxic among them | Jev | MLP, cloud | k-NN, cloud |
+|---|---|---|---|---|
+| 25 | 1 to 8 | 0.62 | 0.59 | 0.38 |
+| 50 | 1 to 9 | **0.66** | 0.53 | 0.41 |
+| 100 | 7 to 15 | 0.68 | 0.74 | **0.78** |
+| 1,000 | 86 to 116 | 0.70 | 0.75 | **0.78** |
+| 8,000 | 786 | | 0.79 | **0.81** |
+
+Three things stand out:
+
+- **Jev is useful with almost no labels.** With 50 labeled comments, it reaches 0.66 F1, and more labels barely help: picking the threshold from 1,000 labels only gets it to 0.70. With 25 or more labels, the chosen threshold almost always lands at 0.92 or 0.93.
+- **Below about 100 labels, the custom models are a gamble.** With 25 or 50 labels, there are only a handful of toxic comments to learn from, and the result depends on which ones you happened to get. The shaded areas span almost the whole chart: some subsets give a decent model, others give one that never flags anything.
+- **With cloud embeddings, around 100 labels is enough to beat Jev on `toxic`.** That's about ten toxic examples. I expected the crossover to take thousands.
+
+The k-NN line starts at zero for a reason I'll come back to below.
+
+The `toxic` label is the easy case: 1 in 11 comments has it. For the rare labels, the training data simply doesn't contain enough examples. Averaged across all six labels, Jev's average precision is 0.53, and the custom models only catch up at around 2,000 labeled comments.
+
+## The embedding matters more than the classifier
+
+So far I've focused on the cloud embeddings, because the MiniLM versions were never competitive. It's worth looking at how big the gap is.
+
+![Average precision on the toxic label as training data grows, for the MLP and k-NN on cloud and MiniLM embeddings](/images/embedding-vs-classifier.png)
+*Figure 6: Average precision on the `toxic` label as the training set grows. Solid lines use cloud embeddings, dashed lines use MiniLM. 100 examples on cloud embeddings beat 8,000 on MiniLM.*
+
+The MLP trained on 100 cloud-embedded comments reaches 0.84 average precision. Trained on all 8,000 MiniLM-embedded comments, it reaches 0.72. Eighty times more training data doesn't make up for the weaker embeddings.
+
+The choice of classifier matters much less. On cloud embeddings, the MLP and k-NN are close: k-NN has the better F1, the MLP the better average precision. On MiniLM, the MLP is clearly better than k-NN. A likely explanation is that k-NN treats every dimension of the embedding as equally important, so it finds comments about the same *topic* rather than comments with the same *tone*, while the MLP can learn which dimensions matter. I didn't test that directly.
+
+MiniLM is a general-purpose model trained to group sentences by meaning. The cloud model was asked for embeddings meant for classification, and it's a much larger model. For a task that depends on tone more than topic, that difference dominates.
+
+## A closer look at k-NN
+
+k-NN was the approach I expected least from, and it ended up being the most interesting. It doesn't train, so adding a labeled comment just means storing one more embedding, and every decision can be explained by showing the comments it was based on. Two questions decide how well it works: how many examples it needs, and how many neighbors it should look at.
+
+The first answer depends on the number of *positive* examples, not the total number of labels. Grouping the runs from the previous section by how many toxic comments they happened to contain makes that clear:
+
+| Toxic comments among the labels | `toxic` F1 | Average precision |
+|---|---|---|
+| 0 to 3 | 0.00 | 0.29 to 0.61 |
+| 4 to 6 | 0.71 | 0.73 |
+| 7 to 10 | 0.78 | 0.82 |
+| 11 to 30 | 0.78 | 0.81 to 0.82 |
+| 786 (all 8,000 labels) | 0.81 | 0.83 |
+
+With 7 neighbors, a comment only scores 0.5 or higher if at least 4 of its neighbors are toxic, so with fewer than 4 toxic examples k-NN can't flag anything. That's why its line in Figure 5 starts at zero. Its ranking is already useful at that point, and fewer neighbors fix the problem: with only 2 or 3 toxic examples, looking at 3 neighbors gets 0.60 F1. From about 10 toxic examples on, k-NN with 7 neighbors is within a few points of where it ends up with all 786.
+
+Which raises the second question. Seven neighbors made sense for a small dataset, but with 8,000 labels there's room for more. To choose without peeking at the evaluation comments, I scored every labeled comment using its nearest *other* labeled comments, and picked the number of neighbors that ranked them best. That was 51. On the evaluation comments:
+
+| k-NN on cloud embeddings | ROC-AUC | Average precision | F1 with a fair threshold |
+|---|---|---|---|
+| 7 neighbors | 0.96 | 0.83 | 0.80 |
+| 51 neighbors | **0.98** | **0.90** | 0.79 |
+| For comparison: MLP | 0.96 | 0.85 | 0.77 |
+
+With 51 neighbors, k-NN ranks toxic comments better than anything else in this comparison, and it beats the MLP's average precision in every bootstrap resample. It doesn't help where it counts for a yes/no decision, though: F1 stays the same, and so does the average across all six labels. For rare labels like `threat`, which has 27 examples in the whole training set, 51 neighbors mostly dilutes the few positives. The right number of neighbors grows with the number of positive examples, so it's something to revisit as the labels pile up, label by label.
+
+The weaknesses are the ones you'd expect. k-NN is only as good as the embeddings: on MiniLM, it ends up as the weakest approach, and even 101 neighbors only lift its average precision to 0.65. And its cost grows with the data, since every comment is compared against every stored example. That's 13 ms for 8,000 comments, but a site with millions of labeled comments would need a vector index to keep it fast.
+
+## Speed, cost and trade-offs
+
+Accuracy is only part of the decision. The approaches also differ in how fast they answer, what each comment costs, and how much work they take to set up and keep running.
+
+### Per comment
+
+| Pipeline | Median time | Tokens per comment | Cost per 1,000 comments |
+|---|---|---|---|
+| MiniLM + MLP | 10 ms | none | none |
+| MiniLM + k-NN | 12 ms | none | none |
+| Cloud embeddings + MLP | 254 ms | about 80 | about $0.016 |
+| Cloud embeddings + k-NN | 267 ms | about 80 | about $0.016 |
+| Jev, all six questions | 209 ms | about 935 in, 111 out | about $0.039 |
+| Jev, `toxic` only | 206 ms | about 450 in, 21 out | about $0.019 |
+
+I measured the local pipelines on my laptop's CPU, an AMD Ryzen 7 5800H. For the network calls, I sent 60 evaluation comments from the same laptop, one request at a time, alternating between the embedding API and Jev so that both saw the same network conditions. The costs use the prices listed today: Jev 1.13 charges $0.042 per million input tokens, and [output tokens are free][jev-models]. Google's [pricing page][gemini-pricing] lists $0.20 per million tokens for its current embedding model; it doesn't list `gemini-embedding-001` separately, so I used the same price.
+
+A few things in that table surprised me:
+
+- **Jev was faster than the embedding call on its own.** The median embedding request took 254 ms, against 209 ms for Jev answering all six questions. The cloud pipelines still have to run the classifier after that, so the trained model doesn't buy any speed over Jev unless the embedding model runs locally.
+- **More questions cost tokens, not time.** Asking one question took about as long as asking six. Each extra question adds about 100 input tokens on top of a fixed cost of about 360 tokens per request, which includes the comment itself.
+- **The money is small for everyone.** With all six questions, Jev costs about 4 cents per thousand comments. The embedding call costs about 1.6 cents. Only the local pipeline is free, and only because you're paying for the CPU yourself.
+
+For this blog, none of this matters: comments arrive a few times a week, and moderation runs in the background after the comment is saved. At a million comments a day, it starts to: about $39 a day for Jev with six questions, $16 for the embedding calls, and nothing for MiniLM. Jev also has a default rate limit of 80 requests per second, which is about 7 million requests a day.
+
+### Setting it up and keeping it running
+
+| | Custom model, MiniLM | Custom model, cloud embeddings | Jev |
+|---|---|---|---|
+| Labels to get started | Thousands, and it keeps improving | About 10 positives per label | None, about 50 to pick a threshold |
+| One-time work | Embed the labels locally, then train the MLP (3 s) or store the embeddings | Embed the labels through the API, then train the MLP (7 s) or store the embeddings | Write the questions |
+| What you host | A 91 MB embedding model plus the MLP or the stored embeddings | The MLP or the stored embeddings | Nothing |
+| When the definition changes | Relabel, then retrain the MLP; k-NN only needs the new labels | Same | Edit the question, then check the threshold |
+| When the model changes | Re-embed every labeled comment | Same | Check the threshold again |
+| Where the comment goes | Nowhere: it can run in the browser | Google | TypeSafe |
+
+The biggest cost of a custom model isn't in either table: it's the labels. Training takes seconds and the API calls cost cents, but someone has to read and label every comment first. Even at five seconds a comment, the 8,000 labels in this dataset are 11 hours of work, and the rare labels need thousands of comments to collect enough examples.
+
+The last row is the one that matters most for some sites. A MiniLM model can run entirely in the reader's browser, as I showed in [the earlier post][onnx], so the comment never leaves their device. Both the cloud embeddings and Jev send the comment text to a third party.
+
+## What this doesn't tell you
+
+- **The rare labels are too small to judge.** `threat` has 6 examples in the evaluation set and `identity_hate` has 13. A single comment moves their scores a lot, so I've avoided drawing conclusions from them individually.
+- **The labels are noisy.** As the examples above show, some "false positives" are really labeling mistakes. Precision for every approach is measured against those labels, which hurts an approach that disagrees with the raters' habits more than one that learned them.
+- **I wrote one set of questions.** I didn't iterate on the wording of Jev's questions, and I didn't tune the MLP beyond the setup from the earlier post. Both could probably do better.
+- **The cloud embedding model changed.** My first PyTorch post used `text-embedding-004`. This comparison uses `gemini-embedding-001`, so the cloud numbers aren't directly comparable with that post.
+
+The code, cached predictions and analysis scripts are in [the repository][repo].
+
+## Conclusion
+
+So, would a model trained on my own comments be more accurate than Jev? On this dataset, yes, if I had good embeddings and around a hundred labeled comments, as long as about ten of them are examples of what I'm looking for. That's far fewer than I expected.
+
+But that comes with conditions. The embedding model has to suit the task, because the wrong one cost more accuracy than any other choice in this comparison. Every label needs its own handful of positive examples, which takes thousands of comments for the rare ones. And then there's the pipeline: embeddings, a stored dataset or a trained model, a threshold, and hosting. Of the two custom models, k-NN is the easier one to live with: there's no training step, and every new label improves it immediately.
+
+Jev skips all of that. It ranked comments as well as the custom models by ROC-AUC, it was a little less precise at the top of the list, and it needed about 50 labeled comments to pick a threshold, not to learn the task. When the definition changes, I edit a sentence.
+
+For this blog, where I have a hundred comments, one question, and no interest in maintaining a training pipeline, that's still the right trade. If I ever have thousands of labeled comments and a reason to care about the last few points of precision, I now know the custom model is worth building, and that the first thing to get right is the embedding model.
 
 [spam]: https://bandarra.me/posts/fighting-comment-spam
-[pytorch]: https://bandarra.me/posts/from-pytorch-to-browser-creating-a-web-friendly-ai-model
 [onnx]: https://bandarra.me/posts/from-pytorch-to-browser-a-full-client-side-solution-with-onnx-and-transformers-js
 [jev]: https://docs.typesafe.ai/concepts/system-one
 [noul]: https://docs.typesafe.ai/primitives/noul
 [jigsaw]: https://www.kaggle.com/competitions/jigsaw-toxic-comment-classification-challenge
-[repo]: https://github.com/andreban/jigsaw-toxic-comment-classification-challenge
 [minilm]: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+[jev-models]: https://docs.typesafe.ai/models
+[gemini-pricing]: https://ai.google.dev/gemini-api/docs/pricing
+[repo]: https://github.com/andreban/jev-classify-knn-comparison
+[questions]: https://github.com/andreban/jev-classify-knn-comparison/blob/main/src/eval_jev.py

@@ -177,3 +177,7 @@ data/train.csv
 /*.jsonl
 *.gz
 /*.tflite
+
+# Editor swap files (may contain .env contents)
+*.swp
+*.swo

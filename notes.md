@@ -1,80 +1,89 @@
-# Notes: Jev vs. PyTorch MLP vs. k-NN Classification Benchmark Article
+# Notes: Jev vs. PyTorch MLP vs. k-NN (re-evaluated 2026-10-13)
 
-## Sources & Repositories
-- **Workspace / Benchmark Repo**: `/Users/andreban/Projects/jev-classify-knn-comparison` (cloned from `https://github.com/andreban/jigsaw-toxic-comment-classification-challenge` with evaluation scripts added in `src/`).
-- **Previous Blog Posts Referenced**:
-  - [*Fighting Comment Spam Without Training a Model*](https://bandarra.me/posts/fighting-comment-spam) (`articles/jev-comment-spam` in ZNotes)
-  - [*From PyTorch to Browser: Creating a Web-Friendly AI Model*](https://bandarra.me/posts/from-pytorch-to-browser-creating-a-web-friendly-ai-model)
-  - [*From PyTorch to Browser: a full client-side solution with ONNX and Transformers.js*](https://bandarra.me/posts/from-pytorch-to-browser-a-full-client-side-solution-with-onnx-and-transformers-js)
-- **Original k-NN Reference**: `/Users/andreban/Projects/ai/embed-classification-knn/src/bin/knn-classifier.rs`
-- **Original Jev Client Reference**: `https://github.com/andreban/bandarrame_rs` (`lib/src/clients/jev/` and `lib/src/agents/comment_classifier/jev.rs`)
+## Sources
+- Previous posts:
+  - Fighting Comment Spam Without Training a Model: https://bandarra.me/posts/fighting-comment-spam (ZNotes `articles/jev-comment-spam`)
+  - From PyTorch to Browser, part 1 (YouTube *sentiment*, 17,872 comments, `text-embedding-004`, 768->512->3, SGD): https://bandarra.me/posts/from-pytorch-to-browser-creating-a-web-friendly-ai-model
+  - From PyTorch to Browser, part 2 (Jigsaw, `all-MiniLM-L6-v2`, 384->128->BN->32->BN->6, reported "98% accuracy"): https://bandarra.me/posts/from-pytorch-to-browser-a-full-client-side-solution-with-onnx-and-transformers-js
+- Part 1 did NOT use Jigsaw. The 768d Jigsaw model in this repo (768->512->BN->128->BN->6) was not in a published post.
+- Cloud embeddings in this benchmark are `gemini-embedding-001` (CLASSIFICATION, 768 dims, vector norm ~0.59), not `text-embedding-004`, despite the `YT-comments-text-embedding-004-...` file name.
 
-## Dataset & Split
-- **Dataset**: Kaggle Jigsaw Toxic Comment Classification Challenge (`data/train.csv`, first `10,000` rows).
-- **Split**: Deterministic 80/20 split (`torch.manual_seed(1)`), saved in `data/split_indices.json` (`8,000` train / `2,000` validation).
-- **Validation Positives (`n = 2,000` comments, `12,000` binary cells)**:
-  - `toxic`: `185` (`9.25%`)
-  - `insult`: `95` (`4.75%`)
-  - `obscene`: `89` (`4.45%`)
-  - `severe_toxic`: `20` (`1.00%`)
-  - `identity_hate`: `13` (`0.65%`)
-  - `threat`: `6` (`0.30%`)
-  - Clean (`all 6 labels == 0`): `1,805` (`90.25%` exact-match, `96.60%` element-wise accuracy for an all-zeros baseline).
+## Data
+- First 10,000 rows of Jigsaw `train.csv`; split 8,000 / 2,000 from `data/split_indices.json` (seed 1). No duplicate texts between train and val.
+- Validation positives: toxic 185, insult 95, obscene 89, severe_toxic 20, identity_hate 13, threat 6. All-zeros baseline = 96.6% element accuracy.
+- Training positives: toxic 786, severe_toxic 81, obscene 438, threat 27, insult 399, identity_hate 71.
 
-## Evaluation Scripts & Cached Outputs
-- `src/eval_pytorch.py`: Trains `ToxicityModel` (`384->128->64->6` for MiniLM, `768->128->64->6` for Cloud 768d) and runs training set size sweeps ($N \in \{15, 25, 50, 100, 250, 500, 1000, 2000, 4000, 8000\}$).
-  - Outputs: `results/pytorch_{minilm,gemini}.jsonl`, `results/pytorch_{minilm,gemini}_meta.json`, `results/pytorch_sweep_{minilm,gemini}.json`
-- `src/eval_knn.py`: Runs pure $k$-NN ($K=7$, Euclidean distance) and runs training size sweeps ($N = 15..8000$) + $K$-sweeps ($K \in \{1, 3, 5, 7, 11, 15, 21, 31\}$).
-  - Outputs: `results/knn_{minilm,gemini}.jsonl`, `results/knn_{minilm,gemini}_meta.json`, `results/knn_sweep_{minilm,gemini}.json`, `results/knn_ksweep_{minilm,gemini}.json`
-- `src/eval_jev.py`: Calls `POST https://api.typesafe.ai/v1/systemone` (`jev-1.13.0`) with all 6 `Noul` toxicity questions per validation comment.
-  - Outputs: `results/jev.jsonl`, `results/jev_checkpoint.jsonl`, `results/jev_meta.json`
-- `charts.py`: Generates all 5 publication charts in `results/plots/` using the light editorial palette (`SURF="#fcfcfb"`, `INK="#0b0b0b"`, `INK2="#52514e"`, `GRID="#e4e3df"`, `BLUE="#2a78d6"`, `ORANGE="#eb6834"`, `AQUA="#1baf7a"`).
+## Problems found in the first (antigravity) analysis
+1. Jev threshold 0.95 was chosen on the 2,000 rows it was scored on; trained models were held to 0.5. Fixed: threshold-free metrics + F1 with the threshold tuned on one random half and scored on the other (300 splits), same for every method.
+2. "Jev has the highest ROC-AUC" is within noise (paired bootstrap CI includes 0). On toxic average precision Jev is significantly below the cloud MLP (-0.059, 95% CI [-0.11, -0.014]).
+3. Sweep used one subset per N (first N rows) and a fixed number of epochs, so small N got ~100 optimizer steps vs ~1,600 at N=8,000 (MiniLM models at small N never converged, outputs stuck around 0.2-0.87). Fixed: 10 random subsets per N, fixed optimizer-step budget (1,600 cloud / 2,400 MiniLM).
+4. Jev "zero labels" F1 of 0.706 used 2,000 labels for calibration. Added a calibration-budget curve.
+5. Wrong facts in the draft: Jev macro F1 at 0.5 is 0.454 (draft said 0.369); "90.75% clean" should be 90.25%; MLP architecture described as D->128->64->6 (actually 768->512->128->6 and 384->128->32->6); MLP sizes 196 KB / 388 KB / 99,206 params (actually 53,926 params = 216 KB and 461,446 params = 1.8 MB); "edit war" example quote was invented; README re-run flags (`--sweep`, `--ksweep`) don't exist.
+6. Single-comment latency numbers (9.18 ms MiniLM, 260.8 ms cloud embedding) had no script in the repo. Local ones re-measured with `src/bench_local_latency.py`; cloud embedding latency not re-measured (no API key on this machine).
+7. "MLP is conservative on rare labels / k-NN wins rare labels" was mostly a 0.5-threshold artefact. With tuned thresholds macro F1: k-NN 0.57, MLP 0.54, Jev 0.51. Rare labels (6 and 13 positives) are too small to rank methods.
 
-## Key Numbers Summary
+## Key numbers (results/reevaluation.json)
+### Full data, toxic label
+| Approach | ROC-AUC [95% CI] | Avg precision [95% CI] | F1 @0.5 | F1 CV threshold (median thr) |
+|---|---|---|---|---|
+| Jev | 0.966 [0.953, 0.975] | 0.792 [0.735, 0.840] | 0.511 | 0.700 (0.92) |
+| MLP cloud | 0.958 [0.937, 0.975] | 0.852 [0.811, 0.891] | 0.784 | 0.770 (0.51) |
+| k-NN cloud | 0.963 [0.945, 0.978] | 0.827 [0.771, 0.880] | 0.805 | 0.798 (0.71) |
+| MLP MiniLM | 0.919 | 0.711 | 0.622 | 0.646 |
+| k-NN MiniLM | 0.863 | 0.558 | 0.512 | 0.547 |
 
-### 1. Full Dataset Comparison (`N = 8,000` train, `2,000` val)
-```
-Approach                       | Elem Acc | Macro AUC | Toxic AUC | Toxic F1 | Macro F1 | Micro F1
----------------------------------------------------------------------------------------------------
-All-Zeros Baseline             |   96.60% |    0.5000 |    0.5000 |   0.0000 |   0.0000 |   0.0000
-PyTorch MLP (Cloud 768d)       |   98.28% |    0.9653 |    0.9581 |   0.7839 |   0.4528 |   0.7287
-PyTorch MLP (Local MiniLM 384d)|   97.78% |    0.9019 |    0.9190 |   0.6215 |   0.3239 |   0.6042
-k-NN K=7 (Cloud 768d)          |   98.19% |    0.9564 |    0.9630 |   0.8053 |   0.5706 |   0.7468
-k-NN K=7 (Local MiniLM 384d)   |   97.27% |    0.8266 |    0.8634 |   0.5121 |   0.2944 |   0.4623
-Jev Zero-Shot (thr = 0.50)     |   92.95% |    0.9666 |    0.9657 |   0.5107 |   0.3688 |   0.4716
-Jev Zero-Shot (thr = 0.95)     |   97.70% |    0.9666 |    0.9657 |   0.7055 |   0.4310 |   0.6788
-```
+Macro over 6 labels (AUC / AP / F1@0.5 / F1 CV): Jev 0.967/0.528/0.454/0.514; MLP cloud 0.965/0.614/0.453/0.541; k-NN cloud 0.956/0.615/0.571/0.568; MLP MiniLM 0.902/0.456/0.324/0.426; k-NN MiniLM 0.827/0.349/0.294/0.387.
 
-### 2. Per-Category ROC-AUC and F1 (`N = 8,000`) + Embedding Model Delta (`Cloud 768d` vs `Local MiniLM 384d`)
-```
-Category       Support | Jev AUC  MLP(768) MLP(384)  kNN(768) kNN(384) | Jev F1(@.95) MLP(768) MLP(384)  kNN(768) kNN(384)
---------------------------------------------------------------------------------------------------------------------------
-toxic              185 |  0.9657    0.9581   0.9190    0.9630   0.8634 |       0.7055   0.7839   0.6215    0.8053   0.5121
-insult              95 |  0.9773    0.9735   0.9277    0.9841   0.8787 |       0.6441   0.6845   0.5963    0.7447   0.4706
-obscene             89 |  0.9905    0.9896   0.9589    0.9869   0.8700 |       0.7684   0.7955   0.7261    0.7442   0.4530
-severe_toxic        20 |  0.9806    0.9868   0.9569    0.9344   0.8104 |       0.3000   0.0952   0.0000    0.2069   0.0952
-identity_hate       13 |  0.9842    0.9940   0.9284    0.9574   0.7942 |       0.2400   0.3529   0.0000    0.6364   0.2353
-threat               6 |  0.9014    0.8898   0.7196    0.9125   0.7431 |       0.0000*  0.0000   0.0000    0.2857   0.0000
-(*Jev threat F1 is 0.4000 at thr = 0.85, as its top threat predictions score 0.85–0.92.)
-```
-- **Embedding Quality vs. Data Quantity**:
-  - `Cloud 768d` at $N=50$ achieves `0.692` (`MLP`) and `0.644` (`k-NN`) `toxic` F1, and at $N=100$ achieves `0.731` (`MLP`) and `0.761` (`k-NN`).
-  - `Local MiniLM 384d` at $N=8,000$ ($160\times$ more training examples) tops out at `0.622` (`MLP`) and `0.512` (`k-NN`).
-  - On `Cloud 768d`, `k-NN` beats `MLP` (`0.805` vs `0.784` `toxic` F1; `0.571` vs `0.453` Macro F1). On `Local MiniLM 384d`, `MLP` beats `k-NN` (`0.622` vs `0.512` `toxic` F1; `0.324` vs `0.294` Macro F1) because the MLP's first linear layer (`384 -> 128`) learns to filter out topic-similarity dimensions, whereas `k-NN` weights all 384 dimensions equally.
+### Jev calibration budget (toxic F1 with threshold picked on N val labels, scored on the rest)
+10: 0.56 | 25: 0.62 | 50: 0.66 | 100: 0.68 | 200: 0.69 | 500: 0.70 | 1000: 0.70. Median chosen threshold 0.92-0.93 for N >= 25.
 
-### 3. Single-Comment Latency & Token Usage
-- **Local MiniLM (384d, CPU) single-comment embed**: `9.18 ms` median (`10.78 ms` mean, `p10: 8.32 ms`, `p90: 14.16 ms`).
-- **Cloud Embedding API (`gemini-embedding-001`, 768d) single-comment embed**: `260.80 ms` median (`265.41 ms` mean, `p10: 240.28 ms`, `p90: 296.43 ms`).
-- **PyTorch MLP single-item forward pass (CPU)**: `0.036 ms` median (384d) / `0.049 ms` median (768d); `0.0010 ms` / `0.0023 ms` per comment when batched over 2,000 comments.
-- **k-NN ($K=7$, $N=8,000$) single-item search (CPU)**: `1.71 ms` median (384d) / `3.72 ms` median (768d); `0.0139 ms` / `0.0177 ms` per comment when batched over 2,000 comments.
-- **Jev (`jev-1.13.0`, 6 `Noul` questions in one HTTP call)**:
-  - Latency: `194.96 ms` median (`202.52 ms` mean, `p10: 182.10 ms`, `p90: 224.04 ms`).
-  - Tokens: `945.5` input tokens and `111.0` output tokens per comment (`1,891,010` input / `222,000` output tokens across all 2,000 validation comments).
+### Sweep, toxic, mean of 10 random subsets (F1 @0.5 / AP)
+- MLP cloud: 25: 0.59/0.73, 50: 0.53/0.75, 100: 0.74/0.84, 1000: 0.75/0.85, 8000: 0.79/0.88
+- k-NN(7) cloud: 25: 0.38/0.66, 50: 0.41/0.74, 100: 0.78/0.81, 1000: 0.78/0.82, 8000: 0.81/0.83
+- MLP MiniLM: 100: 0.29/0.32, 1000: 0.48/0.53, 8000: 0.64/0.72
+- k-NN(7) MiniLM: 100: 0.31/0.38, 1000: 0.44/0.47, 8000: 0.51/0.56
+- At N <= 50, 10th-90th percentile F1 spans ~0 to ~0.77 (depends on which positives are sampled).
+- Macro AP: trained cloud models reach Jev's 0.53 at about N = 2,000.
 
-## Charts Attached to the Article Note
-1. `roc-curves.png`: ROC curves on `toxic` across all 5 configurations with `toxic` AUC and 6-category Macro AUC in legend, plus Jev `0.50` vs `0.95` operating points.
-2. `threshold-calibration.png`: Two-panel threshold sweep (`0.10` to `0.98`) comparing zero-shot Jev against the trained PyTorch MLP.
-3. `data-efficiency.png`: Two-panel training set size sweep ($N = 15$ to $8,000$, log scale) showing `toxic` F1 (including the $k$-NN `0.00` F1 cliff at $N \le 25$) and 6-category Macro ROC-AUC.
-4. `per-category-f1.png`: Per-category ROC-AUC and F1 score across all 6 Jigsaw labels (`toxic`, `insult`, `obscene`, `severe_toxic`, `identity_hate`, `threat`).
-5. `embedding-comparison.png`: Two-panel comparison of `Cloud 768d` vs `Local MiniLM 384d` embeddings across both `PyTorch MLP` and `k-NN` (showing the classifier winner flip at $N=8,000$ and how $N=50$ on Cloud 768d beats $N=8,000$ on MiniLM 384d).
-6. `performance-and-cost.png`: Single-comment end-to-end latency breakdown (embedding step vs. classifier step) and classifier memory footprint scaling ($O(1)$ MLP weights vs. $O(N)$ $k$-NN vector index).
+### Label noise
+- 37 val comments labeled not-toxic get Jev toxic >= 0.95. 5 of them carry another label (insult/identity_hate/obscene) without toxic. By manual reading ~26/37 are plainly hostile ("OMG, you are an imbecile.", "Stay off my talk page, stalker.", veiled threat to an admin). 10 val rows overall have another label but toxic = 0.
+- Lowest-scored toxic positives include a barnstar thank-you and "Add Mobile porn as additional WP:ALSO link".
+
+### Latency and size (results/latency_local.json, AMD Ryzen 7 5800H, 4 torch threads)
+- MiniLM embed 10.0 ms median; MLP 0.045 ms (MiniLM) / 0.077 ms (cloud); k-NN over 8,000 rows 1.6 ms (384d) / 12.7 ms (768d).
+- Sizes: MiniLM model 91 MB; MLPs 53,926 params (216 KB) / 461,446 params (1.8 MB); k-NN index 12.3 MB / 24.6 MB.
+- Jev (recorded during eval, concurrency 16): 195 ms median, p10 182, p90 224. 945.5 input + 111.0 output tokens per comment (six questions).
+
+## Charts (charts.py -> results/plots/)
+1. `ranking-quality.png`: toxic ROC-AUC and average precision with 95% bootstrap intervals, 5 configurations.
+2. `jev-threshold.png`: Jev precision / recall / F1 vs threshold on toxic, marks 0.5 and 0.92.
+3. `labels-needed.png`: toxic F1 vs labeled examples: Jev (threshold picked on N labels) vs MLP and k-NN trained on N (cloud embeddings), p10-p90 bands.
+4. `embedding-vs-classifier.png`: toxic average precision vs N for MLP and k-NN on cloud vs MiniLM, Jev reference line.
+5. `jev-scores.png`: Jev toxic score histograms for toxic vs clean comments (article Figure 2).
+6. `per-label.png`: average precision for toxic / obscene / insult (article Figure 4).
+7. `hero.png` (hero.py): t-SNE of the 2,000 eval comments' cloud embeddings, toxic in orange.
+
+Article figure order: ranking-quality (1), jev-scores (2), jev-threshold (3), per-label (4), labels-needed (5), embedding-vs-classifier (6).
+
+## k-NN deep dive (src/knn_choose_k.py -> results/knn_choose_k.json, results/knn_*_chosen_k.jsonl)
+- Article terminology: "custom models" = MLP + k-NN (both built from labels); Jev is the only one that isn't.
+- Positives needed (K=7, cloud, runs with N <= 250 grouped by toxic positives in the subset): 0-3 -> F1 0.00 (AP 0.29-0.61); 4-6 -> 0.71 / 0.73; 7-10 -> 0.78 / 0.82; 11-30 -> 0.78 / 0.81-0.82; full data (786) -> 0.81 / 0.83. With 2-3 positives K=3 gets 0.60 F1, K=1 0.67.
+- K chosen by leave-one-out on the 8,000 training rows (macro AP): cloud K=51, MiniLM K=101. Larger K beyond 51 flattens.
+- Cloud K=51 on eval: toxic AUC 0.981, AP 0.896 [0.858, 0.926], fair-threshold F1 0.790 (K=7: 0.796), macro fair F1 0.556 (K=7: 0.568), macro AP 0.618 (K=7: 0.615). AP beats MLP by +0.043 [0.022, 0.068] (100% of bootstrap resamples) and Jev by +0.10.
+- MiniLM K=101: toxic AP 0.648, AUC 0.919, fair F1 0.619.
+- Takeaway: more neighbors improves ranking, not decisions; rare labels (threat: 27 train positives) get diluted at large K.
+
+## Per-label view (labels with enough positives)
+| Label | Jev AP / fair F1 | MLP cloud | k-NN cloud (K=7) |
+|---|---|---|---|
+| toxic (185) | 0.792 / 0.700 | 0.852 / 0.770 | 0.827 / 0.798 |
+| obscene (89) | 0.848 / 0.736 | 0.865 / 0.786 | 0.807 / 0.750 |
+| insult (95) | 0.630 / 0.631 | 0.754 / 0.697 | 0.771 / 0.731 |
+- Insult gap is a definition mismatch: 112 non-insult comments get Jev insult >= 0.9, 51 of them labeled toxic (e.g. "Man, you are really a dishonest person, disgusting!!!!"). 94 of 95 labeled insults score > 0.5. 88 of 95 insults are also toxic.
+- Article section "Beyond the toxic label" covers this; severe_toxic / identity_hate / threat (20 / 13 / 6) are called too small to compare.
+
+## Network latency and cost (src/bench_network_latency.py -> results/latency_network.json)
+- 60 eval comments, sequential, interleaved, from the Ryzen laptop: gemini-embedding-001 median 254 ms (p10 236, p90 280, mean 299); Jev six questions 209 ms (189-233); Jev toxic-only 206 ms (184-242).
+- Tokens: embedding ~82 mean (43 median); Jev six questions ~935 in / 111 out; Jev one question ~453 in / 21 out. ~96 tokens per extra question, ~356 fixed (includes the comment).
+- Pricing (checked 2026-10-13): Jev 1.13 $0.042 per M input tokens, output free (docs.typesafe.ai/models); Google lists $0.20 per M for gemini-embedding-2 (embedding-001 not listed separately; same price assumed). Per 1,000 comments: Jev 6q $0.039, Jev 1q $0.019, embedding $0.016. Jev default rate limit 80 rps / 100K tok/s.
+- MLP training on 8,000 rows (this laptop, 8 threads): 2.8 s MiniLM, 7.1 s cloud.

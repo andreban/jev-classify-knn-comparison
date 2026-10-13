@@ -6,7 +6,7 @@ Head-to-head comparison of three text classification approaches on 10,000 commen
 2. **Pure $k$-Nearest Neighbors ($K = 7$)** over the same embeddings.
 3. **Jev (`System One`, `jev-1.13.0`)** zero-shot classification using six `Noul` questions per comment.
 
-See [WALKTHROUGH.md](WALKTHROUGH.md) for the full technical report, [article.md](article.md) for the blog post draft, and [notes.md](notes.md) for evaluation notes.
+See [WALKTHROUGH.md](WALKTHROUGH.md) for the methodology, [article.md](article.md) for the blog post draft, and [notes.md](notes.md) for evaluation notes.
 
 ---
 
@@ -22,16 +22,16 @@ cd jev-classify-knn-comparison
 
 uv venv --python 3.12 .venv
 source .venv/bin/activate
-uv pip install torch sentence-transformers google-genai httpx scikit-learn matplotlib python-dotenv tqdm datasets safetensors
+uv pip install torch scipy sentence-transformers google-genai httpx scikit-learn matplotlib python-dotenv tqdm datasets safetensors
 ```
 
 ### 2. Regenerate charts & metrics immediately (uses cached `results/*.jsonl`)
 
 ```shell
-# Generate the 6 publication charts in results/plots/
+# Generate the 4 publication charts in results/plots/
 .venv/bin/python charts.py
 
-# Recompute comparison summary JSON and dark-mode summary plots
+# Recompute comparison summary JSON (metrics at the 0.5 threshold)
 PYTHONPATH=src .venv/bin/python src/compare_results.py
 ```
 
@@ -46,8 +46,14 @@ The three large files (`data/train.csv`, `SP-all-MiniLM-L6-v2.jsonl`, and `YT-co
 Once restored, you can re-run the PyTorch training or $k$-NN sweeps locally without any API calls:
 
 ```shell
-PYTHONPATH=src .venv/bin/python src/eval_pytorch.py --embedding both --sweep
-PYTHONPATH=src .venv/bin/python src/eval_knn.py --embedding both --sweep --ksweep
+PYTHONPATH=src .venv/bin/python src/eval_pytorch.py --embedding both
+PYTHONPATH=src .venv/bin/python src/eval_knn.py --embedding both
+
+# Fair-threshold re-evaluation, bootstrap CIs and the repeated training-size sweep
+PYTHONPATH=src .venv/bin/python src/reevaluate.py
+
+# Local single-comment latency
+PYTHONPATH=src .venv/bin/python src/bench_local_latency.py
 ```
 
 *(Note: `src/eval_jev.py` automatically resumes from `results/jev_checkpoint.jsonl`, which already has all 2,000 validation comments cached.)*
