@@ -16,6 +16,7 @@ This repository contains the benchmark code, cached evaluation outputs, chart ge
 ### Already Committed in Git (`results/` & root)
 - **Cached Predictions (2,000 validation rows)**:
   - `results/jev.jsonl`, `results/jev_checkpoint.jsonl`, `results/jev_meta.json`
+  - `results/bert.jsonl`, `results/bert_meta.json` (fine-tuned `bert-base-uncased` from `src/eval_bert.py`)
   - `results/pytorch_gemini.jsonl`, `results/pytorch_gemini_meta.json`
   - `results/pytorch_minilm.jsonl`, `results/pytorch_minilm_meta.json`
   - `results/knn_gemini.jsonl`, `results/knn_gemini_meta.json`

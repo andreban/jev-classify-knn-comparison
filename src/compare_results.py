@@ -31,6 +31,7 @@ plt.rcParams.update({
 })
 
 APPROACHES = [
+    ("bert", "BERT (bert-base-uncased)", "results/bert.jsonl", "results/bert_meta.json", "#ab47bc"),
     ("pytorch_gemini", "PyTorch MLP (Gemini 768d)", "results/pytorch_gemini.jsonl", "results/pytorch_gemini_meta.json", "#4fc3f7"),
     ("pytorch_minilm", "PyTorch MLP (MiniLM 384d)", "results/pytorch_minilm.jsonl", "results/pytorch_minilm_meta.json", "#0288d1"),
     ("knn_gemini", "k-NN K=7 (Gemini 768d)", "results/knn_gemini.jsonl", "results/knn_gemini_meta.json", "#ffb74d"),
@@ -411,7 +412,9 @@ def main():
     with open("results/comparison_summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
-    generate_plots(loaded, y_true_ref, Path("results/plots"))
+    import sys
+    if "--plots" in sys.argv:
+        generate_plots(loaded, y_true_ref, Path("results/plots"))
 
     print("\n================ OVERALL COMPARISON SUMMARY ================")
     print(f"Validation Set: {len(y_true_ref)} comments ({y_true_ref.size} binary label decisions)")

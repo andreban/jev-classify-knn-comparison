@@ -72,3 +72,27 @@ def load_full_records(filename):
                 "labels": [float(sample[k]) for k in LABELS],
             })
     return records
+
+
+def load_text_records(csv_path="data/train.csv", fallback_jsonl="SP-all-MiniLM-L6-v2.jsonl", max_records=10000):
+    import csv
+
+    csv_file = Path(csv_path)
+    if csv_file.exists():
+        records = []
+        with open(csv_file, mode="r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for i, row in enumerate(reader):
+                if i >= max_records:
+                    break
+                records.append({
+                    "id": row["id"],
+                    "comment_text": row["comment_text"],
+                    "labels": [float(row[k]) for k in LABELS],
+                })
+        return records
+
+    return [
+        {"id": r["id"], "comment_text": r["comment_text"], "labels": r["labels"]}
+        for r in load_full_records(fallback_jsonl)[:max_records]
+    ]

@@ -4,6 +4,171 @@
   "all_zeros_element_accuracy": 0.966,
   "all_zeros_exact_match_accuracy": 0.9025,
   "approaches": {
+    "bert": {
+      "label": "BERT (bert-base-uncased)",
+      "meta": {
+        "approach": "bert",
+        "model_name": "bert-base-uncased",
+        "device": "mps",
+        "num_parameters": 109486854,
+        "float32_bytes": 437947416,
+        "train_size": 8000,
+        "val_size": 2000,
+        "epochs": 3,
+        "lr": 2e-05,
+        "weight_decay": 0.01,
+        "warmup_ratio": 0.1,
+        "batch_size": 16,
+        "eval_batch_size": 32,
+        "max_length": 128,
+        "seed": 1,
+        "val_element_accuracy": 0.9835833333333334,
+        "train_time_seconds": 544.1074602499721,
+        "val_inference_time_seconds": 9.104655375005677,
+        "per_comment_latency_ms": 4.552327687502839,
+        "epoch_history": [
+          {
+            "epoch": 1,
+            "avg_train_loss": 0.17524747125431894,
+            "epoch_train_seconds": 171.38198329199804,
+            "val_inference_seconds": 9.369907542015426,
+            "val_element_accuracy": 0.98125,
+            "toxic_roc_auc": 0.9766897475988385,
+            "toxic_avg_precision": 0.8853033559902823,
+            "macro_roc_auc": 0.9306779975468017,
+            "macro_avg_precision": 0.529578759232148
+          },
+          {
+            "epoch": 2,
+            "avg_train_loss": 0.052801812570542096,
+            "epoch_train_seconds": 170.61002816696418,
+            "val_inference_seconds": 8.83707141695777,
+            "val_element_accuracy": 0.9829166666666667,
+            "toxic_roc_auc": 0.9791527064254337,
+            "toxic_avg_precision": 0.8843459030536625,
+            "macro_roc_auc": 0.9395521646560309,
+            "macro_avg_precision": 0.5434976763496693
+          },
+          {
+            "epoch": 3,
+            "avg_train_loss": 0.04181709538772702,
+            "epoch_train_seconds": 174.13620300003095,
+            "val_inference_seconds": 9.465784874977544,
+            "val_element_accuracy": 0.9835833333333334,
+            "toxic_roc_auc": 0.9788965825329462,
+            "toxic_avg_precision": 0.8842894528599322,
+            "macro_roc_auc": 0.9407433448293742,
+            "macro_avg_precision": 0.5441239874082029
+          }
+        ]
+      },
+      "metrics": {
+        "threshold": 0.5,
+        "element_accuracy": 0.9835833333333334,
+        "exact_match_accuracy": 0.925,
+        "macro_roc_auc": 0.9407433448293742,
+        "macro_f1": 0.3988946496482062,
+        "macro_precision": 0.564566896990323,
+        "macro_recall": 0.37796855104661137,
+        "micro_roc_auc": 0.9820434816438652,
+        "micro_f1": 0.7383798140770252,
+        "micro_precision": 0.8057971014492754,
+        "micro_recall": 0.6813725490196079,
+        "any_toxic": {
+          "support": 195,
+          "accuracy": 0.9665,
+          "precision": 0.8636363636363636,
+          "recall": 0.7794871794871795,
+          "f1": 0.8194070080862534,
+          "fpr": 0.013296398891966758,
+          "roc_auc": 0.9799005611193975,
+          "tp": 152,
+          "fp": 24,
+          "fn": 43,
+          "tn": 1781
+        },
+        "per_label": {
+          "toxic": {
+            "support": 185,
+            "accuracy": 0.9655,
+            "precision": 0.8295454545454546,
+            "recall": 0.7891891891891892,
+            "f1": 0.8088642659279779,
+            "fpr": 0.01652892561983471,
+            "roc_auc": 0.9788965825329462,
+            "tp": 146,
+            "fp": 30,
+            "fn": 39,
+            "tn": 1785
+          },
+          "severe_toxic": {
+            "support": 20,
+            "accuracy": 0.9905,
+            "precision": 1.0,
+            "recall": 0.05,
+            "f1": 0.09523809523809523,
+            "fpr": 0.0,
+            "roc_auc": 0.9938636363636363,
+            "tp": 1,
+            "fp": 0,
+            "fn": 19,
+            "tn": 1980
+          },
+          "obscene": {
+            "support": 89,
+            "accuracy": 0.9825,
+            "precision": 0.813953488372093,
+            "recall": 0.7865168539325843,
+            "f1": 0.8,
+            "fpr": 0.00837257980115123,
+            "roc_auc": 0.9904632553107673,
+            "tp": 70,
+            "fp": 16,
+            "fn": 19,
+            "tn": 1895
+          },
+          "threat": {
+            "support": 6,
+            "accuracy": 0.997,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "fpr": 0.0,
+            "roc_auc": 0.8002758274824474,
+            "tp": 0,
+            "fp": 0,
+            "fn": 6,
+            "tn": 1994
+          },
+          "insult": {
+            "support": 95,
+            "accuracy": 0.9725,
+            "precision": 0.7439024390243902,
+            "recall": 0.6421052631578947,
+            "f1": 0.6892655367231638,
+            "fpr": 0.011023622047244094,
+            "roc_auc": 0.986183174471612,
+            "tp": 61,
+            "fp": 21,
+            "fn": 34,
+            "tn": 1884
+          },
+          "identity_hate": {
+            "support": 13,
+            "accuracy": 0.9935,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "fpr": 0.0,
+            "roc_auc": 0.8947775928148349,
+            "tp": 0,
+            "fp": 0,
+            "fn": 13,
+            "tn": 1987
+          }
+        }
+      }
+    },
     "pytorch_gemini": {
       "label": "PyTorch MLP (Gemini 768d)",
       "meta": {
@@ -610,6 +775,107 @@
     }
   },
   "toxic_threshold_sweep": {
+    "bert": [
+      {
+        "threshold": 0.3,
+        "tp": 154,
+        "fp": 50,
+        "fn": 31,
+        "tn": 1765,
+        "precision": 0.7549019607843137,
+        "recall": 0.8324324324324325,
+        "f1": 0.7917737789203086,
+        "fpr": 0.027548209366391185
+      },
+      {
+        "threshold": 0.4,
+        "tp": 151,
+        "fp": 37,
+        "fn": 34,
+        "tn": 1778,
+        "precision": 0.8031914893617021,
+        "recall": 0.8162162162162162,
+        "f1": 0.8096514745308311,
+        "fpr": 0.020385674931129475
+      },
+      {
+        "threshold": 0.5,
+        "tp": 146,
+        "fp": 30,
+        "fn": 39,
+        "tn": 1785,
+        "precision": 0.8295454545454546,
+        "recall": 0.7891891891891892,
+        "f1": 0.8088642659279779,
+        "fpr": 0.01652892561983471
+      },
+      {
+        "threshold": 0.6,
+        "tp": 137,
+        "fp": 26,
+        "fn": 48,
+        "tn": 1789,
+        "precision": 0.8404907975460123,
+        "recall": 0.7405405405405405,
+        "f1": 0.7873563218390804,
+        "fpr": 0.014325068870523415
+      },
+      {
+        "threshold": 0.7,
+        "tp": 131,
+        "fp": 17,
+        "fn": 54,
+        "tn": 1798,
+        "precision": 0.8851351351351351,
+        "recall": 0.7081081081081081,
+        "f1": 0.7867867867867867,
+        "fpr": 0.009366391184573003
+      },
+      {
+        "threshold": 0.8,
+        "tp": 120,
+        "fp": 13,
+        "fn": 65,
+        "tn": 1802,
+        "precision": 0.9022556390977443,
+        "recall": 0.6486486486486487,
+        "f1": 0.7547169811320754,
+        "fpr": 0.007162534435261708
+      },
+      {
+        "threshold": 0.85,
+        "tp": 112,
+        "fp": 9,
+        "fn": 73,
+        "tn": 1806,
+        "precision": 0.9256198347107438,
+        "recall": 0.6054054054054054,
+        "f1": 0.7320261437908497,
+        "fpr": 0.0049586776859504135
+      },
+      {
+        "threshold": 0.9,
+        "tp": 96,
+        "fp": 5,
+        "fn": 89,
+        "tn": 1810,
+        "precision": 0.9504950495049505,
+        "recall": 0.518918918918919,
+        "f1": 0.6713286713286714,
+        "fpr": 0.0027548209366391185
+      },
+      {
+        "threshold": 0.95,
+        "tp": 74,
+        "fp": 0,
+        "fn": 111,
+        "tn": 1815,
+        "precision": 1.0,
+        "recall": 0.4,
+        "f1": 0.5714285714285715,
+        "fpr": 0.0
+      }
+    ],
     "pytorch_gemini": [
       {
         "threshold": 0.3,

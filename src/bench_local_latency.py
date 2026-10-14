@@ -12,10 +12,11 @@ import time
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from all_minilm_l6.toxicity_model import ToxicityModel as MiniLMModel
 from text_embedding_004.toxicity_model import ToxicityModel as GeminiModel
-from toxicity_dataset import get_or_create_split_indices, load_full_records
+from toxicity_dataset import LABELS, get_or_create_split_indices, load_full_records
 
 N_RUNS = 300
 
@@ -38,10 +39,36 @@ def main():
     texts = [recs[i]["comment_text"] for i in va[:N_RUNS]]
     out = {"machine": f"{platform.processor() or platform.machine()} / {platform.system()}", "torch_threads": 4}
 
-    st = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")
+    st = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu", local_files_only=True)
     it = iter(texts * 2)
     out["minilm_embed"] = timeit(lambda: st.encode([next(it)]))
     out["comment_chars_median"] = float(np.median([len(t) for t in texts]))
+
+    bert_tok = AutoTokenizer.from_pretrained("bert-base-uncased", local_files_only=True)
+    bert_cpu = AutoModelForSequenceClassification.from_pretrained(
+        "bert-base-uncased", num_labels=len(LABELS), local_files_only=True
+    ).eval()
+    bert_params = sum(p.numel() for p in bert_cpu.parameters())
+    it_bert_cpu = iter(texts * 2)
+
+    def run_bert_cpu():
+        enc = bert_tok([next(it_bert_cpu)], padding=True, truncation=True, max_length=256, return_tensors="pt")
+        with torch.no_grad():
+            bert_cpu(**enc)
+
+    out["bert_cpu"] = timeit(run_bert_cpu) | {"params": bert_params, "float32_bytes": bert_params * 4}
+
+    if torch.backends.mps.is_available():
+        bert_mps = bert_cpu.to("mps")
+        it_bert_mps = iter(texts * 2)
+
+        def run_bert_mps():
+            enc = bert_tok([next(it_bert_mps)], padding=True, truncation=True, max_length=256, return_tensors="pt").to("mps")
+            with torch.no_grad():
+                bert_mps(**enc)
+            torch.mps.synchronize()
+
+        out["bert_mps"] = timeit(run_bert_mps) | {"params": bert_params, "float32_bytes": bert_params * 4}
 
     for name, cls, dim, f in [("minilm", MiniLMModel, 384, "SP-all-MiniLM-L6-v2.jsonl"),
                               ("gemini", GeminiModel, 768, "YT-comments-text-embedding-004-768-10k.jsonl")]:

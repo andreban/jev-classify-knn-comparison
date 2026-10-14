@@ -42,6 +42,7 @@ CALIB_SIZES = [10, 25, 50, 100, 200, 500, 1000]
 KNN_KS = [1, 3, 7]
 
 CONFIGS = {
+    "bert": "results/bert.jsonl",
     "pytorch_gemini": "results/pytorch_gemini.jsonl",
     "knn_gemini": "results/knn_gemini.jsonl",
     "jev": "results/jev.jsonl",
@@ -92,7 +93,7 @@ def cv_threshold_f1(y, p, rng, repeats=CV_REPEATS):
 
 
 def full_data_analysis(rng):
-    preds = {k: load_predictions(v) for k, v in CONFIGS.items()}
+    preds = {k: load_predictions(v) for k, v in CONFIGS.items() if Path(v).exists()}
     y = preds["jev"][1]
     for k, (_, yk) in preds.items():
         assert (yk == y).all(), k
@@ -136,7 +137,7 @@ def full_data_analysis(rng):
     # Paired bootstrap: Jev minus each other model.
     diffs = {}
     pj = preds["jev"][0]
-    for name in CONFIGS:
+    for name in preds:
         if name == "jev":
             continue
         po = preds[name][0]
@@ -276,14 +277,34 @@ def run_sweep():
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--no-sweep",
+        action="store_true",
+        help="Skip re-running the 10x10 training-size sweep and preserve existing sweep in results/reevaluation.json",
+    )
+    args = parser.parse_args()
+
+    out_path = Path("results/reevaluation.json")
+    existing_sweep = None
+    if args.no_sweep and out_path.exists():
+        existing_data = json.loads(out_path.read_text(encoding="utf-8"))
+        existing_sweep = existing_data.get("sweep")
+
     rng = np.random.default_rng(SEED)
     out = {"full_data": full_data_analysis(rng)}
-    if all(Path(c["file"]).exists() for c in EMBEDDINGS.values()):
+    if args.no_sweep:
+        if existing_sweep is not None:
+            out["sweep"] = existing_sweep
+        print("Skipped sweep (--no-sweep); preserved existing sweep data.")
+    elif all(Path(c["file"]).exists() for c in EMBEDDINGS.values()):
         rows, summary = run_sweep()
         out["sweep"] = {"repeats": REPEATS, "sizes": SWEEP_SIZES, "summary": summary, "runs": rows}
     else:
         print("Embedding files missing; skipping sweep (run ./scripts/restore_data.sh).")
-    Path("results/reevaluation.json").write_text(json.dumps(out, indent=1))
+    out_path.write_text(json.dumps(out, indent=1))
     print("wrote results/reevaluation.json")
 
 

@@ -48,6 +48,7 @@ Once restored, you can re-run the PyTorch training or $k$-NN sweeps locally with
 ```shell
 PYTHONPATH=src .venv/bin/python src/eval_pytorch.py --embedding both
 PYTHONPATH=src .venv/bin/python src/eval_knn.py --embedding both
+PYTHONPATH=src .venv/bin/python src/eval_bert.py
 
 # Fair-threshold re-evaluation, bootstrap CIs and the repeated training-size sweep
 PYTHONPATH=src .venv/bin/python src/reevaluate.py
