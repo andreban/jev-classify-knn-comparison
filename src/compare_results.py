@@ -412,9 +412,7 @@ def main():
     with open("results/comparison_summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
-    import sys
-    if "--plots" in sys.argv:
-        generate_plots(loaded, y_true_ref, Path("results/plots"))
+    generate_plots(loaded, y_true_ref, Path("results/plots"))
 
     print("\n================ OVERALL COMPARISON SUMMARY ================")
     print(f"Validation Set: {len(y_true_ref)} comments ({y_true_ref.size} binary label decisions)")

@@ -47,6 +47,11 @@ CONFIGS = {
     "jev": "results/jev.jsonl",
     "pytorch_minilm": "results/pytorch_minilm.jsonl",
     "knn_minilm": "results/knn_minilm.jsonl",
+}
+# Models added after the article was published. They draw their threshold
+# splits from their own RNG so the shared RNG stream above, and with it every
+# published number, stays exactly the same.
+LATER_CONFIGS = {
     "bert": "results/bert.jsonl",
 }
 EMBEDDINGS = {
@@ -93,7 +98,8 @@ def cv_threshold_f1(y, p, rng, repeats=CV_REPEATS):
 
 
 def full_data_analysis(rng):
-    preds = {k: load_predictions(v) for k, v in CONFIGS.items() if Path(v).exists()}
+    preds = {k: load_predictions(v) for k, v in CONFIGS.items()}
+    preds |= {k: load_predictions(v) for k, v in LATER_CONFIGS.items() if Path(v).exists()}
     y = preds["jev"][1]
     for k, (_, yk) in preds.items():
         assert (yk == y).all(), k
@@ -107,7 +113,7 @@ def full_data_analysis(rng):
         return float(np.mean([metric(yy[:, j], pp[:, j]) for j in range(6)]))
 
     for name, (p, _) in preds.items():
-        model_rng = np.random.default_rng(SEED)
+        model_rng = rng if name in CONFIGS else np.random.default_rng(SEED)
         per_label = {}
         for j, label in enumerate(LABELS):
             f05, tp, fp = f1_at(y[:, j], p[:, j], 0.5)
@@ -135,21 +141,29 @@ def full_data_analysis(rng):
             },
         }
 
-    # Paired bootstrap: Jev minus each other model.
-    diffs = {}
+    # Paired bootstrap: a reference model minus each other model.
+    def paired_diffs(ref):
+        diffs = {}
+        pr = preds[ref][0]
+        for name in preds:
+            if name == ref:
+                continue
+            po = preds[name][0]
+            d = {}
+            for mname, metric in [("roc_auc", roc_auc_score), ("avg_precision", average_precision_score)]:
+                tox = np.array([metric(y[ii, 0], pr[ii, 0]) - metric(y[ii, 0], po[ii, 0]) for ii in boot_idx])
+                mac = np.array([macro(metric, y[ii], pr[ii]) - macro(metric, y[ii], po[ii]) for ii in boot_idx])
+                d[f"toxic_{mname}"] = {"median": float(np.median(tox)), "ci95": np.percentile(tox, [2.5, 97.5]).tolist(),
+                                       "share_ref_ahead": float((tox > 0).mean())}
+                d[f"macro_{mname}"] = {"median": float(np.median(mac)), "ci95": np.percentile(mac, [2.5, 97.5]).tolist(),
+                                       "share_ref_ahead": float((mac > 0).mean())}
+            diffs[name] = d
+        return diffs
+
     pj = preds["jev"][0]
-    for name in preds:
-        if name == "jev":
-            continue
-        po = preds[name][0]
-        d = {}
-        for mname, metric in [("roc_auc", roc_auc_score), ("avg_precision", average_precision_score)]:
-            tox = np.array([metric(y[ii, 0], pj[ii, 0]) - metric(y[ii, 0], po[ii, 0]) for ii in boot_idx])
-            mac = np.array([macro(metric, y[ii], pj[ii]) - macro(metric, y[ii], po[ii]) for ii in boot_idx])
-            d[f"toxic_{mname}"] = {"median": float(np.median(tox)), "ci95": np.percentile(tox, [2.5, 97.5]).tolist()}
-            d[f"macro_{mname}"] = {"median": float(np.median(mac)), "ci95": np.percentile(mac, [2.5, 97.5]).tolist()}
-        diffs[name] = d
-    out["jev_minus_model"] = diffs
+    out["jev_minus_model"] = paired_diffs("jev")
+    if "bert" in preds:
+        out["bert_minus_model"] = paired_diffs("bert")
 
     # Jev threshold table on toxic (descriptive, full validation set).
     table = []
@@ -162,11 +176,10 @@ def full_data_analysis(rng):
 
     # How many labeled examples does Jev need to calibrate its threshold?
     calib = []
-    calib_rng = np.random.default_rng(SEED)
     for m in CALIB_SIZES:
         f1s, ths = [], []
         for _ in range(CV_REPEATS):
-            perm = calib_rng.permutation(len(yt))
+            perm = rng.permutation(len(yt))
             a, b = perm[:m], perm[m:]
             t = best_threshold(yt[a], pj[a, 0])
             f1s.append(f1_at(yt[b], pj[b, 0], t)[0])

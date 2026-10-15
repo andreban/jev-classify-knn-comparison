@@ -26,17 +26,16 @@
 ### Full data, toxic label
 | Approach | ROC-AUC [95% CI] | Avg precision [95% CI] | F1 @0.5 | F1 CV threshold (median thr) |
 |---|---|---|---|---|
-| BERT (`bert-base-uncased`, fine-tuned) | 0.979 [0.969, 0.987] | 0.884 [0.850, 0.918] | 0.809 | 0.801 (0.44) |
 | Jev | 0.966 [0.953, 0.975] | 0.792 [0.735, 0.840] | 0.511 | 0.700 (0.92) |
-| MLP cloud | 0.958 [0.937, 0.975] | 0.852 [0.811, 0.891] | 0.784 | 0.771 (0.51) |
-| k-NN cloud | 0.963 [0.945, 0.978] | 0.827 [0.771, 0.880] | 0.805 | 0.799 (0.71) |
+| MLP cloud | 0.958 [0.937, 0.975] | 0.852 [0.811, 0.891] | 0.784 | 0.770 (0.51) |
+| k-NN cloud | 0.963 [0.945, 0.978] | 0.827 [0.771, 0.880] | 0.805 | 0.798 (0.71) |
 | MLP MiniLM | 0.919 | 0.711 | 0.622 | 0.646 |
-| k-NN MiniLM | 0.863 | 0.558 | 0.512 | 0.545 |
+| k-NN MiniLM | 0.863 | 0.558 | 0.512 | 0.547 |
 
-Macro over 6 labels (AUC / AP / F1@0.5 / F1 CV): BERT 0.941/0.544/0.399/0.494; Jev 0.967/0.528/0.454/0.519; MLP cloud 0.965/0.614/0.453/0.540; k-NN cloud 0.956/0.615/0.571/0.566; MLP MiniLM 0.902/0.456/0.324/0.424; k-NN MiniLM 0.827/0.349/0.294/0.381.
+Macro over 6 labels (AUC / AP / F1@0.5 / F1 CV): Jev 0.967/0.528/0.454/0.514; MLP cloud 0.965/0.614/0.453/0.541; k-NN cloud 0.956/0.615/0.571/0.568; MLP MiniLM 0.902/0.456/0.324/0.426; k-NN MiniLM 0.827/0.349/0.294/0.387.
 
 ### Jev calibration budget (toxic F1 with threshold picked on N val labels, scored on the rest)
-10: 0.58 | 25: 0.63 | 50: 0.66 | 100: 0.68 | 200: 0.69 | 500: 0.69 | 1000: 0.70. Median chosen threshold 0.92-0.93 for N >= 25.
+10: 0.56 | 25: 0.62 | 50: 0.66 | 100: 0.68 | 200: 0.69 | 500: 0.70 | 1000: 0.70. Median chosen threshold 0.92-0.93 for N >= 25.
 
 ### Sweep, toxic, mean of 10 random subsets (F1 @0.5 / AP)
 - MLP cloud: 25: 0.59/0.73, 50: 0.53/0.75, 100: 0.74/0.84, 1000: 0.75/0.85, 8000: 0.79/0.88
@@ -75,11 +74,11 @@ Article figure order: ranking-quality (1), jev-scores (2), jev-threshold (3), pe
 - Takeaway: more neighbors improves ranking, not decisions; rare labels (threat: 27 train positives) get diluted at large K.
 
 ## Per-label view (labels with enough positives)
-| Label | BERT (fine-tuned) | Jev AP / fair F1 | MLP cloud | k-NN cloud (K=7) |
-|---|---|---|---|---|
-| toxic (185) | 0.884 / 0.801 | 0.792 / 0.700 | 0.852 / 0.771 | 0.827 / 0.799 |
-| obscene (89) | 0.874 / 0.775 | 0.848 / 0.738 | 0.865 / 0.788 | 0.807 / 0.751 |
-| insult (95) | 0.828 / 0.710 | 0.630 / 0.630 | 0.754 / 0.696 | 0.771 / 0.726 |
+| Label | Jev AP / fair F1 | MLP cloud | k-NN cloud (K=7) |
+|---|---|---|---|
+| toxic (185) | 0.792 / 0.700 | 0.852 / 0.770 | 0.827 / 0.798 |
+| obscene (89) | 0.848 / 0.736 | 0.865 / 0.786 | 0.807 / 0.750 |
+| insult (95) | 0.630 / 0.631 | 0.754 / 0.697 | 0.771 / 0.731 |
 - Insult gap is a definition mismatch: 112 non-insult comments get Jev insult >= 0.9, 51 of them labeled toxic (e.g. "Man, you are really a dishonest person, disgusting!!!!"). 94 of 95 labeled insults score > 0.5. 88 of 95 insults are also toxic.
 - Article section "Beyond the toxic label" covers this; severe_toxic / identity_hate / threat (20 / 13 / 6) are called too small to compare.
 
@@ -89,15 +88,15 @@ Article figure order: ranking-quality (1), jev-scores (2), jev-threshold (3), pe
 - Pricing (checked 2026-10-13): Jev 1.13 $0.042 per M input tokens, output free (docs.typesafe.ai/models); Google lists $0.20 per M for gemini-embedding-2 (embedding-001 not listed separately; same price assumed). Per 1,000 comments: Jev 6q $0.039, Jev 1q $0.019, embedding $0.016. Jev default rate limit 80 rps / 100K tok/s.
 - MLP training on 8,000 rows (this laptop, 8 threads): 2.8 s MiniLM, 7.1 s cloud.
 
-## Fine-tuned BERT (`src/eval_bert.py` -> `results/bert.jsonl`, `results/bert_meta.json`)
-- Setup: `bert-base-uncased` (`AutoModelForSequenceClassification`, 6 binary labels, `BCEWithLogitsLoss`), 3 epochs on the 8,000 training comments (`lr=2e-5`, `weight_decay=0.01`, `warmup_ratio=0.1`, `batch_size=16`, `max_length=128`, `seed=1`, `float16` autocast on Apple M1 Pro MPS).
-- Why `MiniLM + MLP` lost: Fine-tuning BERT end-to-end completely closes and surpasses the gap between local models and cloud embeddings on every label with >=80 training positives:
-  - `toxic` (786 train / 185 val positives): ROC-AUC 0.979 [0.969, 0.987], AP 0.884 [0.850, 0.918], F1@0.5 0.809, fair CV threshold F1 0.801 (median thr 0.44). Paired bootstrap `jev_minus_model`: toxic AUC -0.014 [-0.026, -0.001], toxic AP -0.093 [-0.141, -0.050].
-  - `obscene` (438 train / 89 val): ROC-AUC 0.990, AP 0.874, F1@0.5 0.800, fair F1 0.775.
-  - `insult` (399 train / 95 val): ROC-AUC 0.986, AP 0.828, F1@0.5 0.689, fair F1 0.710 (beats cloud MLP 0.754 AP and cloud k-NN 0.771 AP).
-  - `severe_toxic` (81 train / 20 val): ROC-AUC 0.994, AP 0.537, fair F1 0.511 (beats cloud MLP 0.388 AP).
-- Ultra-rare labels starve during 3-epoch joint fine-tuning: `threat` (27 train / 6 val positives) gets 0.800 AUC / 0.024 AP, and `identity_hate` (71 train / 13 val) gets 0.895 AUC / 0.117 AP, which pulls unweighted 6-label macro AP (0.544) and macro AUC (0.941) below cloud MLP (0.614 / 0.965) despite BERT winning all four larger labels.
-- Size, latency & training time (Apple M1 Pro):
-  - Parameters: 109,486,854 (437.9 MB fp32) vs 91 MB MiniLM + 216 KB MLP.
-  - Single-comment inference (`results/latency_local.json`, measured on the base `bert-base-uncased` + 6-label head architecture at `max_length=128`): 43.9 ms median on CPU (4 threads, p10 36.2, p90 51.0) and 13.4 ms median on MPS (p10 11.7, p90 16.1); batched eval (bs=32) of the fine-tuned model is 4.55 ms/comment on MPS.
-  - Training time (8,000 rows, 3 epochs): 544 s (~9.1 min on M1 Pro MPS, ~171 s/epoch) vs 3–7 s for the MLP on cached embeddings.
+## Fine-tuned BERT (follow-up, added 2026-10-15; `article-bert.md`)
+Not part of the published article. Published numbers above are unchanged: BERT is in `LATER_CONFIGS` in `src/reevaluate.py` and uses its own RNG, so the shared RNG stream for the original five models is untouched.
+
+- Setup (`src/eval_bert.py` -> `results/bert.jsonl`, `results/bert_meta.json`): `bert-base-uncased`, 6-label head, `BCEWithLogitsLoss`, 3 epochs on the 8,000 training rows, lr 2e-5, weight decay 0.01, 10% warmup, batch 16, max_length 128, seed 1, float16 autocast on Apple M1 Pro MPS. One run, no tuning, final epoch reported (no selection on val). 544 s training.
+- Toxic: AUC 0.979 [0.969, 0.987], AP 0.884 [0.850, 0.918], F1@0.5 0.809 (146 TP, 30 FP), fair CV F1 0.801 (median thr 0.44).
+- Paired bootstrap on toxic AP (`bert_minus_model` in `results/reevaluation.json`): vs MLP cloud +0.033 [0.006, 0.064] (BERT ahead in 99% of resamples); vs k-NN cloud K=7 +0.058 [0.016, 0.100]; vs Jev +0.093 [0.050, 0.141] (100%). vs k-NN cloud K=51 (0.896 AP): -0.011 [-0.035, 0.012], a tie (ad hoc check, BERT ahead in 16%).
+- Fair F1 on toxic is a tie with k-NN cloud (0.801 vs 0.798), not a win.
+- Per label, AP / fair F1: toxic 0.884 / 0.801; obscene 0.874 / 0.775 (MLP cloud 0.865 / 0.786: tie on AP, MLP better F1); insult 0.828 / 0.710 (best AP; k-NN cloud F1 0.731 is better); severe_toxic 0.537 / 0.511 (best, 20 eval positives).
+- Rare labels fail: threat AP 0.024 (27 train / 6 val positives), max threat score over all 2,000 val rows is 0.23, positives score <= 0.09 (median rank ~121). identity_hate AP 0.117 (71 / 13), max score 0.41. Macro AP 0.544 [0.506, 0.598] (Jev 0.528, MLP cloud 0.614, k-NN cloud 0.615); macro fair F1 0.494 (below Jev 0.514).
+- Label noise: of Jev's 37 clean-labeled comments with toxic >= 0.95, BERT flags 16 at 0.5 (MLP cloud 14).
+- Latency (`src/bench_bert_latency.py` -> `results/latency_bert.json`, architecture forward pass, 4 threads, max_length 128): Ryzen 7 5800H CPU median 52 ms (p10 30, p90 113); M1 Pro CPU 44 ms; M1 Pro MPS 13 ms. MiniLM + MLP on the Ryzen is ~10 ms (`results/latency_local.json`, unchanged). 109.5M params, 438 MB fp32.
+- Label sweep (`src/sweep_bert.py` -> `results/bert_sweep.json`, `results/bert_sweep_runs.jsonl`): same random subsets as the MLP/k-NN sweep (`default_rng(1000 * rep + n)`), 3 repeats, CPU, 3 epochs or 200 optimizer steps (whichever is more). One run at N=100 took ~16 min end to end on the Ryzen with 16 threads.

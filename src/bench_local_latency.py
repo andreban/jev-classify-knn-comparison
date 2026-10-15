@@ -1,8 +1,5 @@
-"""Single-comment latency of the local pipelines (MiniLM embedding, BERT, MLP, k-NN).
+"""Single-comment latency of the local pipelines (MiniLM embedding, MLP, k-NN).
 
-Note: BERT and MLP timings benchmark the model architecture forward pass directly
-(base bert-base-uncased + 6-label classification head at max_length=128, and
-ToxicityModel instances) without requiring saved fine-tuned BERT weights on disk.
 Network calls (cloud embedding API, Jev) are not measured here; Jev latency is
 recorded per request in results/jev.jsonl.
 
@@ -15,28 +12,12 @@ import time
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from all_minilm_l6.toxicity_model import ToxicityModel as MiniLMModel
 from text_embedding_004.toxicity_model import ToxicityModel as GeminiModel
-from toxicity_dataset import LABELS, get_or_create_split_indices, load_full_records
+from toxicity_dataset import get_or_create_split_indices, load_full_records
 
 N_RUNS = 300
-BERT_MAX_LENGTH = 128
-
-
-def load_hf_pretrained(cls, model_name: str, **kwargs):
-    try:
-        return cls.from_pretrained(model_name, local_files_only=True, **kwargs)
-    except Exception:
-        return cls.from_pretrained(model_name, local_files_only=False, **kwargs)
-
-
-def load_sentence_transformer(model_name: str, **kwargs):
-    try:
-        return SentenceTransformer(model_name, local_files_only=True, **kwargs)
-    except Exception:
-        return SentenceTransformer(model_name, local_files_only=False, **kwargs)
 
 
 def timeit(fn, n=N_RUNS):
@@ -57,44 +38,10 @@ def main():
     texts = [recs[i]["comment_text"] for i in va[:N_RUNS]]
     out = {"machine": f"{platform.processor() or platform.machine()} / {platform.system()}", "torch_threads": 4}
 
-    st = load_sentence_transformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")
+    st = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")
     it = iter(texts * 2)
     out["minilm_embed"] = timeit(lambda: st.encode([next(it)]))
     out["comment_chars_median"] = float(np.median([len(t) for t in texts]))
-
-    bert_tok = load_hf_pretrained(AutoTokenizer, "bert-base-uncased")
-    bert_cpu = load_hf_pretrained(
-        AutoModelForSequenceClassification, "bert-base-uncased", num_labels=len(LABELS)
-    ).eval()
-    bert_params = sum(p.numel() for p in bert_cpu.parameters())
-    it_bert_cpu = iter(texts * 2)
-
-    def run_bert_cpu():
-        enc = bert_tok([next(it_bert_cpu)], padding=True, truncation=True, max_length=BERT_MAX_LENGTH, return_tensors="pt")
-        with torch.no_grad():
-            bert_cpu(**enc)
-
-    out["bert_cpu"] = timeit(run_bert_cpu) | {
-        "params": bert_params,
-        "float32_bytes": bert_params * 4,
-        "max_length": BERT_MAX_LENGTH,
-    }
-
-    if torch.backends.mps.is_available():
-        bert_mps = bert_cpu.to("mps")
-        it_bert_mps = iter(texts * 2)
-
-        def run_bert_mps():
-            enc = bert_tok([next(it_bert_mps)], padding=True, truncation=True, max_length=BERT_MAX_LENGTH, return_tensors="pt").to("mps")
-            with torch.no_grad():
-                bert_mps(**enc)
-            torch.mps.synchronize()
-
-        out["bert_mps"] = timeit(run_bert_mps) | {
-            "params": bert_params,
-            "float32_bytes": bert_params * 4,
-            "max_length": BERT_MAX_LENGTH,
-        }
 
     for name, cls, dim, f in [("minilm", MiniLMModel, 384, "SP-all-MiniLM-L6-v2.jsonl"),
                               ("gemini", GeminiModel, 768, "YT-comments-text-embedding-004-768-10k.jsonl")]:

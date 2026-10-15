@@ -64,8 +64,9 @@ def load_hf_pretrained(cls, model_name: str, **kwargs):
 
 
 def make_length_grouped_batches(lengths: np.ndarray, batch_size: int, rng: np.random.Generator) -> list[np.ndarray]:
-    """Group samples into 64-token buckets and shuffle batches within each bucket
-    so tensor shapes only change once per bucket per epoch."""
+    """Sort samples by length (with a little jitter), cut the sorted list into
+    batches, and shuffle the batch order. Similar-length comments share a batch,
+    which keeps padding low; collate_encoded pads each batch to a multiple of 64."""
     jitter = rng.uniform(-2.0, 2.0, size=len(lengths))
     order = np.argsort(lengths + jitter)
     batches = [order[i : i + batch_size] for i in range(0, len(order), batch_size)]

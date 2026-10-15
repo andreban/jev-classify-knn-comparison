@@ -5,7 +5,7 @@ This repository contains the benchmark code, cached evaluation outputs, chart ge
 1. **Custom PyTorch MLP (`ToxicityModel`)** trained on embeddings (`768d` Cloud `CLASSIFICATION` embeddings and `384d` local `sentence-transformers/all-MiniLM-L6-v2`).
 2. **Pure $k$-Nearest Neighbors ($K = 7$)** over the same embeddings.
 3. **Jev (`System One`, `jev-1.13.0`)** zero-shot classification using six `Noul` questions per comment.
-4. **Fine-tuned BERT (`bert-base-uncased`)** trained end-to-end on the 8,000 training comments (`src/eval_bert.py`; documented in `notes.md` and benchmark outputs, not yet folded into `article.md`).
+4. **Fine-tuned BERT (`bert-base-uncased`)** trained end-to-end on the 8,000 training comments (`src/eval_bert.py`). Added after `article.md` was published; it is the subject of the follow-up draft `article-bert.md` (metadata in `metadata-bert.md`, charts from `charts_bert.py`). Do not fold BERT into `article.md`, and keep BERT in `LATER_CONFIGS` in `src/reevaluate.py` so the published numbers stay reproducible.
 
 ---
 
@@ -18,6 +18,8 @@ This repository contains the benchmark code, cached evaluation outputs, chart ge
 - **Cached Predictions (2,000 validation rows)**:
   - `results/jev.jsonl`, `results/jev_checkpoint.jsonl`, `results/jev_meta.json`
   - `results/bert.jsonl`, `results/bert_meta.json` (fine-tuned `bert-base-uncased` from `src/eval_bert.py`)
+  - `results/bert_sweep.json`, `results/bert_sweep_runs.jsonl` (BERT training-size sweep, `src/sweep_bert.py`)
+  - `results/latency_bert.json` (BERT latency per machine, `src/bench_bert_latency.py`; `results/latency_local.json` holds the published Ryzen numbers and must not be overwritten from another machine)
   - `results/pytorch_gemini.jsonl`, `results/pytorch_gemini_meta.json`
   - `results/pytorch_minilm.jsonl`, `results/pytorch_minilm_meta.json`
   - `results/knn_gemini.jsonl`, `results/knn_gemini_meta.json`
