@@ -42,12 +42,12 @@ CALIB_SIZES = [10, 25, 50, 100, 200, 500, 1000]
 KNN_KS = [1, 3, 7]
 
 CONFIGS = {
-    "bert": "results/bert.jsonl",
     "pytorch_gemini": "results/pytorch_gemini.jsonl",
     "knn_gemini": "results/knn_gemini.jsonl",
     "jev": "results/jev.jsonl",
     "pytorch_minilm": "results/pytorch_minilm.jsonl",
     "knn_minilm": "results/knn_minilm.jsonl",
+    "bert": "results/bert.jsonl",
 }
 EMBEDDINGS = {
     "gemini": {"file": "YT-comments-text-embedding-004-768-10k.jsonl", "steps": 1600},
@@ -107,10 +107,11 @@ def full_data_analysis(rng):
         return float(np.mean([metric(yy[:, j], pp[:, j]) for j in range(6)]))
 
     for name, (p, _) in preds.items():
+        model_rng = np.random.default_rng(SEED)
         per_label = {}
         for j, label in enumerate(LABELS):
             f05, tp, fp = f1_at(y[:, j], p[:, j], 0.5)
-            cvf, cvt = cv_threshold_f1(y[:, j], p[:, j], rng)
+            cvf, cvt = cv_threshold_f1(y[:, j], p[:, j], model_rng)
             per_label[label] = {
                 "roc_auc": float(roc_auc_score(y[:, j], p[:, j])),
                 "avg_precision": float(average_precision_score(y[:, j], p[:, j])),
@@ -161,10 +162,11 @@ def full_data_analysis(rng):
 
     # How many labeled examples does Jev need to calibrate its threshold?
     calib = []
+    calib_rng = np.random.default_rng(SEED)
     for m in CALIB_SIZES:
         f1s, ths = [], []
         for _ in range(CV_REPEATS):
-            perm = rng.permutation(len(yt))
+            perm = calib_rng.permutation(len(yt))
             a, b = perm[:m], perm[m:]
             t = best_threshold(yt[a], pj[a, 0])
             f1s.append(f1_at(yt[b], pj[b, 0], t)[0])

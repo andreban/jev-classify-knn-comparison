@@ -26,17 +26,17 @@
 ### Full data, toxic label
 | Approach | ROC-AUC [95% CI] | Avg precision [95% CI] | F1 @0.5 | F1 CV threshold (median thr) |
 |---|---|---|---|---|
-| BERT (`bert-base-uncased`, fine-tuned) | 0.979 [0.969, 0.987] | 0.884 [0.850, 0.918] | 0.809 | 0.799 (0.46) |
+| BERT (`bert-base-uncased`, fine-tuned) | 0.979 [0.969, 0.987] | 0.884 [0.850, 0.918] | 0.809 | 0.801 (0.44) |
 | Jev | 0.966 [0.953, 0.975] | 0.792 [0.735, 0.840] | 0.511 | 0.700 (0.92) |
-| MLP cloud | 0.958 [0.937, 0.975] | 0.852 [0.811, 0.891] | 0.784 | 0.770 (0.51) |
-| k-NN cloud | 0.963 [0.945, 0.978] | 0.827 [0.771, 0.880] | 0.805 | 0.798 (0.71) |
+| MLP cloud | 0.958 [0.937, 0.975] | 0.852 [0.811, 0.891] | 0.784 | 0.771 (0.51) |
+| k-NN cloud | 0.963 [0.945, 0.978] | 0.827 [0.771, 0.880] | 0.805 | 0.799 (0.71) |
 | MLP MiniLM | 0.919 | 0.711 | 0.622 | 0.646 |
-| k-NN MiniLM | 0.863 | 0.558 | 0.512 | 0.547 |
+| k-NN MiniLM | 0.863 | 0.558 | 0.512 | 0.545 |
 
-Macro over 6 labels (AUC / AP / F1@0.5 / F1 CV): BERT 0.941/0.544/0.399/0.499; Jev 0.967/0.528/0.454/0.514; MLP cloud 0.965/0.614/0.453/0.541; k-NN cloud 0.956/0.615/0.571/0.568; MLP MiniLM 0.902/0.456/0.324/0.426; k-NN MiniLM 0.827/0.349/0.294/0.387.
+Macro over 6 labels (AUC / AP / F1@0.5 / F1 CV): BERT 0.941/0.544/0.399/0.494; Jev 0.967/0.528/0.454/0.519; MLP cloud 0.965/0.614/0.453/0.540; k-NN cloud 0.956/0.615/0.571/0.566; MLP MiniLM 0.902/0.456/0.324/0.424; k-NN MiniLM 0.827/0.349/0.294/0.381.
 
 ### Jev calibration budget (toxic F1 with threshold picked on N val labels, scored on the rest)
-10: 0.56 | 25: 0.62 | 50: 0.66 | 100: 0.68 | 200: 0.69 | 500: 0.70 | 1000: 0.70. Median chosen threshold 0.92-0.93 for N >= 25.
+10: 0.58 | 25: 0.63 | 50: 0.66 | 100: 0.68 | 200: 0.69 | 500: 0.69 | 1000: 0.70. Median chosen threshold 0.92-0.93 for N >= 25.
 
 ### Sweep, toxic, mean of 10 random subsets (F1 @0.5 / AP)
 - MLP cloud: 25: 0.59/0.73, 50: 0.53/0.75, 100: 0.74/0.84, 1000: 0.75/0.85, 8000: 0.79/0.88
@@ -77,9 +77,9 @@ Article figure order: ranking-quality (1), jev-scores (2), jev-threshold (3), pe
 ## Per-label view (labels with enough positives)
 | Label | BERT (fine-tuned) | Jev AP / fair F1 | MLP cloud | k-NN cloud (K=7) |
 |---|---|---|---|---|
-| toxic (185) | 0.884 / 0.799 | 0.792 / 0.700 | 0.852 / 0.770 | 0.827 / 0.798 |
-| obscene (89) | 0.874 / 0.767 | 0.848 / 0.736 | 0.865 / 0.786 | 0.807 / 0.750 |
-| insult (95) | 0.828 / 0.714 | 0.630 / 0.631 | 0.754 / 0.697 | 0.771 / 0.731 |
+| toxic (185) | 0.884 / 0.801 | 0.792 / 0.700 | 0.852 / 0.771 | 0.827 / 0.799 |
+| obscene (89) | 0.874 / 0.775 | 0.848 / 0.738 | 0.865 / 0.788 | 0.807 / 0.751 |
+| insult (95) | 0.828 / 0.710 | 0.630 / 0.630 | 0.754 / 0.696 | 0.771 / 0.726 |
 - Insult gap is a definition mismatch: 112 non-insult comments get Jev insult >= 0.9, 51 of them labeled toxic (e.g. "Man, you are really a dishonest person, disgusting!!!!"). 94 of 95 labeled insults score > 0.5. 88 of 95 insults are also toxic.
 - Article section "Beyond the toxic label" covers this; severe_toxic / identity_hate / threat (20 / 13 / 6) are called too small to compare.
 
@@ -92,12 +92,12 @@ Article figure order: ranking-quality (1), jev-scores (2), jev-threshold (3), pe
 ## Fine-tuned BERT (`src/eval_bert.py` -> `results/bert.jsonl`, `results/bert_meta.json`)
 - Setup: `bert-base-uncased` (`AutoModelForSequenceClassification`, 6 binary labels, `BCEWithLogitsLoss`), 3 epochs on the 8,000 training comments (`lr=2e-5`, `weight_decay=0.01`, `warmup_ratio=0.1`, `batch_size=16`, `max_length=128`, `seed=1`, `float16` autocast on Apple M1 Pro MPS).
 - Why `MiniLM + MLP` lost: Fine-tuning BERT end-to-end completely closes and surpasses the gap between local models and cloud embeddings on every label with >=80 training positives:
-  - `toxic` (786 train / 185 val positives): ROC-AUC 0.979 [0.969, 0.987], AP 0.884 [0.850, 0.918], F1@0.5 0.809, fair CV threshold F1 0.799 (median thr 0.46). Paired bootstrap `jev_minus_model`: toxic AUC -0.014 [-0.026, -0.001], toxic AP -0.093 [-0.141, -0.050].
-  - `obscene` (438 train / 89 val): ROC-AUC 0.990, AP 0.874, F1@0.5 0.800, fair F1 0.767.
-  - `insult` (399 train / 95 val): ROC-AUC 0.986, AP 0.828, F1@0.5 0.689, fair F1 0.714 (beats cloud MLP 0.754 AP and cloud k-NN 0.771 AP).
-  - `severe_toxic` (81 train / 20 val): ROC-AUC 0.994, AP 0.537, fair F1 0.538 (beats cloud MLP 0.388 AP).
+  - `toxic` (786 train / 185 val positives): ROC-AUC 0.979 [0.969, 0.987], AP 0.884 [0.850, 0.918], F1@0.5 0.809, fair CV threshold F1 0.801 (median thr 0.44). Paired bootstrap `jev_minus_model`: toxic AUC -0.014 [-0.026, -0.001], toxic AP -0.093 [-0.141, -0.050].
+  - `obscene` (438 train / 89 val): ROC-AUC 0.990, AP 0.874, F1@0.5 0.800, fair F1 0.775.
+  - `insult` (399 train / 95 val): ROC-AUC 0.986, AP 0.828, F1@0.5 0.689, fair F1 0.710 (beats cloud MLP 0.754 AP and cloud k-NN 0.771 AP).
+  - `severe_toxic` (81 train / 20 val): ROC-AUC 0.994, AP 0.537, fair F1 0.511 (beats cloud MLP 0.388 AP).
 - Ultra-rare labels starve during 3-epoch joint fine-tuning: `threat` (27 train / 6 val positives) gets 0.800 AUC / 0.024 AP, and `identity_hate` (71 train / 13 val) gets 0.895 AUC / 0.117 AP, which pulls unweighted 6-label macro AP (0.544) and macro AUC (0.941) below cloud MLP (0.614 / 0.965) despite BERT winning all four larger labels.
 - Size, latency & training time (Apple M1 Pro):
   - Parameters: 109,486,854 (437.9 MB fp32) vs 91 MB MiniLM + 216 KB MLP.
-  - Single-comment inference (`results/latency_local.json`): 46.4 ms median on CPU (4 threads, p10 35.9, p90 69.6) and 13.7 ms median on MPS (p10 11.8, p90 22.2); batched eval (bs=32) is 4.55 ms/comment on MPS.
+  - Single-comment inference (`results/latency_local.json`, measured on the base `bert-base-uncased` + 6-label head architecture at `max_length=128`): 43.9 ms median on CPU (4 threads, p10 36.2, p90 51.0) and 13.4 ms median on MPS (p10 11.7, p90 16.1); batched eval (bs=32) of the fine-tuned model is 4.55 ms/comment on MPS.
   - Training time (8,000 rows, 3 epochs): 544 s (~9.1 min on M1 Pro MPS, ~171 s/epoch) vs 3–7 s for the MLP on cached embeddings.

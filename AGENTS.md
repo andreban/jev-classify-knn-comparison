@@ -1,10 +1,11 @@
 # Agent Instructions (`jev-classify-knn-comparison`)
 
-This repository contains the benchmark code, cached evaluation outputs, chart generator, and blog post draft comparing three text classification approaches on 10,000 comments from the **Kaggle Jigsaw Toxic Comment Classification Challenge** (`8,000` train / `2,000` validation, deterministic `seed=1` split across 6 binary labels: `toxic`, `severe_toxic`, `obscene`, `threat`, `insult`, `identity_hate`):
+This repository contains the benchmark code, cached evaluation outputs, chart generator, and blog post draft comparing four text classification approaches on 10,000 comments from the **Kaggle Jigsaw Toxic Comment Classification Challenge** (`8,000` train / `2,000` validation, deterministic `seed=1` split across 6 binary labels: `toxic`, `severe_toxic`, `obscene`, `threat`, `insult`, `identity_hate`):
 
 1. **Custom PyTorch MLP (`ToxicityModel`)** trained on embeddings (`768d` Cloud `CLASSIFICATION` embeddings and `384d` local `sentence-transformers/all-MiniLM-L6-v2`).
 2. **Pure $k$-Nearest Neighbors ($K = 7$)** over the same embeddings.
 3. **Jev (`System One`, `jev-1.13.0`)** zero-shot classification using six `Noul` questions per comment.
+4. **Fine-tuned BERT (`bert-base-uncased`)** trained end-to-end on the 8,000 training comments (`src/eval_bert.py`; documented in `notes.md` and benchmark outputs, not yet folded into `article.md`).
 
 ---
 

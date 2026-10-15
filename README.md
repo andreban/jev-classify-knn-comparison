@@ -1,10 +1,11 @@
-# Jev vs. PyTorch MLP vs. k-NN Classification Benchmark
+# Jev vs. PyTorch MLP vs. k-NN (and BERT) Classification Benchmark
 
-Head-to-head comparison of three text classification approaches on 10,000 comments (`8,000` train / `2,000` validation, `seed=1`) from the [Kaggle Jigsaw Toxic Comment Classification Challenge][1]:
+Head-to-head comparison of four text classification approaches on 10,000 comments (`8,000` train / `2,000` validation, `seed=1`) from the [Kaggle Jigsaw Toxic Comment Classification Challenge][1]:
 
 1. **Custom PyTorch MLP (`ToxicityModel`)** trained on embeddings (`768d` Cloud `CLASSIFICATION` embeddings and `384d` local `all-MiniLM-L6-v2`).
 2. **Pure $k$-Nearest Neighbors ($K = 7$)** over the same embeddings.
 3. **Jev (`System One`, `jev-1.13.0`)** zero-shot classification using six `Noul` questions per comment.
+4. **Fine-tuned BERT (`bert-base-uncased`)** trained end-to-end on the 8,000 training comments (`src/eval_bert.py`, reported in [notes.md](notes.md)).
 
 See [WALKTHROUGH.md](WALKTHROUGH.md) for the methodology, [article.md](article.md) for the blog post draft, and [notes.md](notes.md) for evaluation notes.
 
