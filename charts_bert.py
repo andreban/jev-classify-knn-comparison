@@ -12,7 +12,7 @@ import os
 
 import numpy as np
 
-from charts import AQUA, BLUE, FD, GRID, INK, INK2, ORANGE, OUT, SURF, SW, grid, plt, save
+from charts import AQUA, BLUE, FD, R, GRID, INK, INK2, ORANGE, OUT, SURF, SW, grid, plt, save
 
 MAGENTA = "#c2417a"
 
@@ -79,19 +79,23 @@ def per_label():
     save(fig, "bert-per-label.png")
 
 
-# 3. Labels needed: toxic average precision vs. training-set size.
+# 3. Labels needed: toxic average precision vs. training-set size. The MLP
+# lines use the same three random subsets per size as the BERT runs (reps 0-2
+# of the sweep in src/reevaluate.py), so every point compares like with like.
 def labels_needed():
     summary = json.load(open("results/bert_sweep.json"))["summary"]
     runs = [json.loads(l) for l in open("results/bert_sweep_runs.jsonl")]
+    reps = sorted({r["rep"] for r in runs})
     full_ap = FD["models"]["bert"]["per_label"]["toxic"]["avg_precision"]
+    sweep_runs = R["sweep"]["runs"]
 
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
-    for key, color, ls, label in [("mlp_gemini", BLUE, "-", "MLP, cloud"), ("mlp_minilm", BLUE, "--", "MLP, MiniLM")]:
-        s = [e for e in SW[key] if e["n"] >= 50]
-        n = [e["n"] for e in s]
-        m = [e["toxic_ap"]["mean"] for e in s]
-        ax.fill_between(n, [e["toxic_ap"]["p10"] for e in s], [e["toxic_ap"]["p90"] for e in s],
-                        color=color, alpha=0.08, linewidth=0)
+    for emb, color, ls, label in [("gemini", BLUE, "-", "MLP, cloud"), ("minilm", BLUE, "--", "MLP, MiniLM")]:
+        n = sorted({r["n"] for r in sweep_runs if r["n"] >= 50})
+        v = [[r["mlp"]["toxic_ap"] for r in sweep_runs if r["embedding"] == emb and r["n"] == x and r["rep"] in reps]
+             for x in n]
+        m = [np.mean(x) for x in v]
+        ax.fill_between(n, [min(x) for x in v], [max(x) for x in v], color=color, alpha=0.08, linewidth=0)
         ax.plot(n, m, color=color, linewidth=2, linestyle=ls, marker="o", markersize=6,
                 markerfacecolor=color if ls == "-" else SURF, markeredgecolor=color, markeredgewidth=1.5)
         ax.text(n[-1] * 1.12, m[-1], label, va="center", fontsize=10, color=INK2)
@@ -100,13 +104,15 @@ def labels_needed():
     m = [e["toxic_ap"]["mean"] for e in summary] + [full_ap]
     ax.plot([r["n"] for r in runs], [r["bert"]["toxic_ap"] for r in runs], "o", markersize=5,
             color=MAGENTA, alpha=0.35, markeredgewidth=0, zorder=2)
-    ax.plot(n, m, color=MAGENTA, linewidth=2, marker="o", markersize=8, markeredgecolor=SURF,
-            markeredgewidth=1.5, zorder=4)
+    # Solid over the sweep sizes, dotted to the single full-data run (no runs in between).
+    ax.plot(n[:-1], m[:-1], color=MAGENTA, linewidth=2, zorder=4)
+    ax.plot(n[-2:], m[-2:], color=MAGENTA, linewidth=2, linestyle=":", zorder=4)
+    ax.plot(n, m, "o", color=MAGENTA, markersize=8, markeredgecolor=SURF, markeredgewidth=1.5, zorder=5)
     ax.text(n[-1] * 1.12, m[-1] + 0.03, "BERT, fine-tuned", va="center", fontsize=10, color=INK2)
 
     jap = FD["models"]["jev"]["per_label"]["toxic"]["avg_precision"]
     ax.axhline(jap, color=AQUA, linewidth=2)
-    ax.text(55, jap + 0.02, f"Jev, no labels: {jap:.2f}", color=INK2, fontsize=10)
+    ax.text(1200, jap - 0.045, f"Jev, no labels: {jap:.2f}", color=INK2, fontsize=10)
     ax.set_xscale("log")
     ticks = [50, 100, 250, 500, 1000, 2000, 4000, 8000]
     ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" for t in ticks])
