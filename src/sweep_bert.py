@@ -11,9 +11,12 @@ steps, whichever is more. Without the step floor, 100 comments would get only
 21 optimizer steps, most of them spent in warmup. Nothing is tuned on the
 validation set: each run is scored once, after training.
 
-Runs on CPU in parallel worker processes and appends each finished run to
-results/bert_sweep_runs.jsonl, so an interrupted sweep resumes where it
-stopped. The summary goes to results/bert_sweep.json.
+Uses a GPU (CUDA or Apple MPS) when available, one run at a time, with the
+same float16 autocast as src/eval_bert.py. Without a GPU it runs several CPU
+worker processes in parallel, which is slow: about 40 minutes per run on a
+Ryzen 7 5800H. Each finished run is appended to results/bert_sweep_runs.jsonl,
+so an interrupted sweep resumes where it stopped, even on another machine.
+The summary goes to results/bert_sweep.json.
 
     PYTHONPATH=src .venv/bin/python src/sweep_bert.py
     PYTHONPATH=src .venv/bin/python src/sweep_bert.py --sizes 100 --repeats 1   # quick timing check
@@ -58,17 +61,18 @@ def _data():
 
 
 def run_job(job):
-    n, rep, threads = job
+    n, rep, threads, device_name = job
     import torch
     import torch.nn as nn
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
-    from eval_bert import collate_encoded, evaluate_model, load_hf_pretrained, make_length_grouped_batches
+    from eval_bert import (autocast_ctx, collate_encoded, evaluate_model, load_hf_pretrained,
+                           make_length_grouped_batches, sync_device)
     from reevaluate import _metrics
     from toxicity_dataset import LABELS
 
     torch.set_num_threads(threads)
-    device = torch.device("cpu")
+    device = torch.device(device_name)
     d = _data()
 
     # Same subset as reevaluate.sweep_job for this (n, rep).
@@ -101,18 +105,20 @@ def run_job(job):
     for _ in range(epochs):
         for b in make_length_grouped_batches(lengths, BATCH_SIZE, rng):
             batch, _ = collate_encoded(train_encoded, b, pad_id, device)
-            loss = loss_fn(model(**batch).logits, torch.tensor(y_sub[b], device=device))
+            with autocast_ctx(device):
+                loss = loss_fn(model(**batch).logits, torch.tensor(y_sub[b], device=device))
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
             sched.step()
+            sync_device(device)
     train_s = time.perf_counter() - t0
 
     probs, _, _ = evaluate_model(model, val_encoded, d["y_val"], EVAL_BATCH_SIZE, pad_id, device)
     return {
         "n": n, "rep": rep, "epochs": epochs, "steps": total_steps,
         "train_positives": y_sub.sum(0).astype(int).tolist(),
-        "train_seconds": train_s, "threads": threads,
+        "train_seconds": train_s, "threads": threads, "device": device_name,
         "bert": _metrics(d["y_val"].astype(np.float32), probs),
     }
 
@@ -134,20 +140,26 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sizes", type=int, nargs="+", default=SIZES)
     ap.add_argument("--repeats", type=int, default=REPEATS)
-    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--device", default=None, help="cpu, mps or cuda (default: best available)")
+    ap.add_argument("--workers", type=int, default=None, help="parallel runs (default: 1 on GPU, 4 on CPU)")
     ap.add_argument("--threads", type=int, default=max(1, (os.cpu_count() or 4) // 4))
     args = ap.parse_args()
+
+    from eval_bert import pick_device
+    device = str(pick_device(args.device))
+    workers = args.workers or (4 if device == "cpu" else 1)
+    print(f"device={device} workers={workers}", flush=True)
 
     done = []
     if RUNS_PATH.exists():
         done = [json.loads(l) for l in RUNS_PATH.read_text().splitlines() if l.strip()]
     have = {(r["n"], r["rep"]) for r in done}
     # Largest jobs first so the pool doesn't end on one long straggler.
-    jobs = [(n, rep, args.threads) for n in sorted(args.sizes, reverse=True)
+    jobs = [(n, rep, args.threads, device) for n in sorted(args.sizes, reverse=True)
             for rep in range(args.repeats) if (n, rep) not in have]
     print(f"{len(have)} runs cached, {len(jobs)} to go", flush=True)
 
-    with ProcessPoolExecutor(max_workers=args.workers) as ex, RUNS_PATH.open("a") as f:
+    with ProcessPoolExecutor(max_workers=workers) as ex, RUNS_PATH.open("a") as f:
         futs = {ex.submit(run_job, j): j for j in jobs}
         for fut in as_completed(futs):
             r = fut.result()
