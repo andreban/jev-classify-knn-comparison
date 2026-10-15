@@ -6,10 +6,13 @@ training rows), so every BERT run can be compared with the MLP and k-NN runs
 built from the same labeled comments.
 
 Recipe: the same as src/eval_bert.py (lr 2e-5, weight decay 0.01, 10% linear
-warmup, batch 16, max_length 128), trained for 3 epochs or MIN_STEPS optimizer
-steps, whichever is more. Without the step floor, 100 comments would get only
-21 optimizer steps, most of them spent in warmup. Nothing is tuned on the
-validation set: each run is scored once, after training.
+warmup, batch 16, max_length 128), trained for at least --min-steps optimizer
+steps (rounded up to whole epochs, and never fewer than 3 epochs). The default,
+1,500, is the step count of the full 8,000-row run, the same rule the MLP sweep
+in src/reevaluate.py follows. An earlier sweep with a 200-step floor left a
+third of the models unable to flag anything (scores never reached 0.5); it is
+kept in results/bert_sweep_200steps*.json*. Nothing is tuned on the validation
+set: each run is scored once, after training.
 
 Uses a GPU (CUDA or Apple MPS) when available, one run at a time, with the
 same float16 autocast as src/eval_bert.py. Without a GPU it runs several CPU
@@ -34,7 +37,7 @@ RUNS_PATH = Path("results/bert_sweep_runs.jsonl")
 SUMMARY_PATH = Path("results/bert_sweep.json")
 SIZES = [25, 50, 100, 250, 500, 1000, 2000]
 REPEATS = 5
-MIN_STEPS = 200
+MIN_STEPS = 1500
 EPOCHS = 3
 BATCH_SIZE = 16
 EVAL_BATCH_SIZE = 64
@@ -61,7 +64,7 @@ def _data():
 
 
 def run_job(job):
-    n, rep, threads, device_name = job
+    n, rep, threads, device_name, min_steps = job
     import torch
     import torch.nn as nn
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
@@ -93,7 +96,7 @@ def run_job(job):
         num_labels=len(LABELS), problem_type="multi_label_classification",
     ).to(device)
     steps_per_epoch = (n + BATCH_SIZE - 1) // BATCH_SIZE
-    epochs = max(EPOCHS, -(-MIN_STEPS // steps_per_epoch))
+    epochs = max(EPOCHS, -(-min_steps // steps_per_epoch))
     total_steps = steps_per_epoch * epochs
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     sched = get_linear_schedule_with_warmup(opt, int(total_steps * WARMUP_RATIO), total_steps)
@@ -116,7 +119,7 @@ def run_job(job):
 
     probs, _, _ = evaluate_model(model, val_encoded, d["y_val"], EVAL_BATCH_SIZE, pad_id, device)
     return {
-        "n": n, "rep": rep, "epochs": epochs, "steps": total_steps,
+        "n": n, "rep": rep, "min_steps": min_steps, "epochs": epochs, "steps": total_steps,
         "train_positives": y_sub.sum(0).astype(int).tolist(),
         "train_seconds": train_s, "threads": threads, "device": device_name,
         "bert": _metrics(d["y_val"].astype(np.float32), probs),
@@ -140,6 +143,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sizes", type=int, nargs="+", default=SIZES)
     ap.add_argument("--repeats", type=int, default=REPEATS)
+    ap.add_argument("--min-steps", type=int, default=MIN_STEPS, help="optimizer-step floor per run")
     ap.add_argument("--device", default=None, help="cpu, mps or cuda (default: best available)")
     ap.add_argument("--workers", type=int, default=None, help="parallel runs (default: 1 on GPU, 4 on CPU)")
     ap.add_argument("--threads", type=int, default=max(1, (os.cpu_count() or 4) // 4))
@@ -153,9 +157,10 @@ def main():
     done = []
     if RUNS_PATH.exists():
         done = [json.loads(l) for l in RUNS_PATH.read_text().splitlines() if l.strip()]
+        done = [r for r in done if r.get("min_steps") == args.min_steps]
     have = {(r["n"], r["rep"]) for r in done}
     # Largest jobs first so the pool doesn't end on one long straggler.
-    jobs = [(n, rep, args.threads, device) for n in sorted(args.sizes, reverse=True)
+    jobs = [(n, rep, args.threads, device, args.min_steps) for n in sorted(args.sizes, reverse=True)
             for rep in range(args.repeats) if (n, rep) not in have]
     print(f"{len(have)} runs cached, {len(jobs)} to go", flush=True)
 
@@ -171,7 +176,7 @@ def main():
                   f"macro AP={r['bert']['macro_ap']:.3f}", flush=True)
 
     SUMMARY_PATH.write_text(json.dumps({
-        "model": MODEL_NAME, "min_steps": MIN_STEPS, "epochs": EPOCHS, "batch_size": BATCH_SIZE,
+        "model": MODEL_NAME, "min_steps": args.min_steps, "epochs": EPOCHS, "batch_size": BATCH_SIZE,
         "lr": LR, "max_length": MAX_LENGTH, "summary": summarize(done),
     }, indent=1))
     print(f"wrote {SUMMARY_PATH}")
