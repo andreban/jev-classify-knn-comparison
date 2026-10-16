@@ -41,6 +41,13 @@ The difference from the last post is in the optimizer line. With frozen embeddin
 
 On `toxic`, BERT reaches 0.98 ROC-AUC and 0.88 average precision, the best of the four on both. The gap to the MLP on cloud embeddings, 0.88 against 0.85, is small but holds up: in a paired bootstrap, BERT comes out ahead in 99% of resamples. Against Jev, it's ahead in every resample.
 
+ROC-AUC hides where the models differ, because all four curves crowd into the top-left corner. Zooming into that corner, where only a small share of clean comments get flagged, makes the differences visible:
+
+![ROC curve on the toxic label, zoomed to false positive rates up to 20%, for fine-tuned BERT, the MLP and k-NN on cloud embeddings, and Jev](/images/bert-roc.png)
+*Figure 2: The top-left corner of the ROC curve on `toxic`. Each curve shows the share of toxic comments caught (up) against the share of clean comments wrongly flagged (right). Higher is better.*
+
+If you accept flagging 2% of clean comments, about 36 of the 1,815, BERT catches 82% of the toxic ones. The two cloud models catch about 76%, and Jev catches 60%. Jev only catches up with the MLP when about 10% of clean comments get flagged. That's why Jev's ROC-AUC (0.97) is higher than the MLP's (0.96) while its average precision is clearly lower: Jev does well in the part of the curve that matters least in practice. The k-NN curve moves in big steps because, with 7 neighbors, it can only give 8 different scores.
+
 It isn't the best ranker I've built on this dataset, though. In the last post, k-NN on cloud embeddings with 51 neighbors reached 0.90 average precision. BERT and that k-NN are a statistical tie.
 
 ## Making decisions
@@ -59,7 +66,7 @@ On `toxic`, BERT ties k-NN on cloud embeddings for the best F1. Better ranking d
 ## The rare labels
 
 ![Average precision on all six labels for fine-tuned BERT, the MLP and k-NN on cloud embeddings, and Jev](/images/bert-per-label.png)
-*Figure 2: Average precision on each label, with the number of examples in the evaluation set in parentheses. BERT leads on the four larger labels and scores close to zero on the two smallest.*
+*Figure 3: Average precision on each label, with the number of examples in the evaluation set in parentheses. BERT leads on the four larger labels and scores close to zero on the two smallest.*
 
 On the four labels with at least 80 training examples, BERT is first or tied for first on average precision:
 
@@ -81,7 +88,7 @@ The likely explanation is that all six labels share one model, trained together 
 The last post's most useful chart showed how quality changes with the number of labels. I repeated it for BERT, training on 50 to 1,000 comments, three times per size, with the same random subsets the MLP and k-NN used. Each run got 1,500 training steps, the same as the full 8,000-comment run, so a small training set is seen many more times. That's the same rule the MLP sweep follows, and it matters. My first sweep gave the small runs only 200 steps, and 4 of its 15 models didn't catch a single toxic comment at the default 0.5 threshold.
 
 ![Average precision on the toxic label as the number of labeled training examples grows, for fine-tuned BERT, the MLP on cloud embeddings, and Jev](/images/bert-labels-needed.png)
-*Figure 3: Average precision on `toxic` as the training set grows. Light dots are individual BERT runs, and the MLP line is the average over the same three subsets. The dotted segment joins the sweep to the single full-data run, with no runs in between.*
+*Figure 4: Average precision on `toxic` as the training set grows. Light dots are individual BERT runs, and the MLP line is the average over the same three subsets. The dotted segment joins the sweep to the single full-data run, with no runs in between.*
 
 | Labeled comments | BERT | MLP, cloud | Jev |
 |---|---|---|---|

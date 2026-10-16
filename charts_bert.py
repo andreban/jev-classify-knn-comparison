@@ -2,7 +2,8 @@
 
 Reuses the style and data loading of charts.py, and adds BERT in MAGENTA,
 which passes the dataviz palette checks next to BLUE, ORANGE and AQUA.
-Reads results/reevaluation.json (src/reevaluate.py) and results/bert_sweep.json
+Reads results/reevaluation.json (src/reevaluate.py), the cached predictions in
+results/*.jsonl, and results/bert_sweep.json
 plus results/bert_sweep_runs.jsonl (src/sweep_bert.py).
 
     .venv/bin/python charts_bert.py
@@ -52,7 +53,35 @@ def ranking():
     save(fig, "bert-ranking.png")
 
 
-# 2. Average precision on all six labels: BERT vs. the cloud models and Jev.
+# 2. ROC curve on `toxic`, zoomed to the low false-positive region where the
+# models differ (at 0.96-0.98 AUC the full curves all hug the corner).
+def roc_zoom():
+    from sklearn.metrics import roc_curve
+
+    load = lambda k: {r["id"]: r for r in map(json.loads, open(f"results/{k}.jsonl"))}
+    ref = load("jev")
+    ids = sorted(ref)
+    y = np.array([ref[i]["expected"]["toxic"] for i in ids])
+    fig, ax = plt.subplots(figsize=(7.5, 5.2))
+    for key, label, color, _ in MODELS:
+        rows = load(key)
+        fpr, tpr, _ = roc_curve(y, [rows[i]["probabilities"]["toxic"] for i in ids])
+        auc = FD["models"][key]["per_label"]["toxic"]["roc_auc"]
+        ax.plot(fpr, tpr, color=color, linewidth=2.2, drawstyle="steps-post", label=f"{label.replace(' (no training)', ', no training')} (AUC {auc:.2f})")
+    ax.set_xlim(0, 0.2)
+    ax.set_ylim(0.6, 1.0)
+    ax.set_xticks([0, 0.05, 0.1, 0.15, 0.2])
+    ax.set_xticklabels(["0%", "5%", "10%", "15%", "20%"])
+    ax.set_yticks([0.6, 0.7, 0.8, 0.9, 1.0])
+    ax.set_yticklabels(["60%", "70%", "80%", "90%", "100%"])
+    ax.set_xlabel("Clean comments wrongly flagged (false positive rate)")
+    ax.set_ylabel("Toxic comments caught (true positive rate)")
+    ax.legend(frameon=False, loc="lower right")
+    grid(ax)
+    save(fig, "bert-roc.png")
+
+
+# 3. Average precision on all six labels: BERT vs. the cloud models and Jev.
 def per_label():
     labels = ["toxic", "insult", "obscene", "severe_toxic", "identity_hate", "threat"]
     models = [("bert", "BERT, fine-tuned", MAGENTA), ("pytorch_gemini", "MLP, cloud", BLUE),
@@ -76,7 +105,7 @@ def per_label():
     save(fig, "bert-per-label.png")
 
 
-# 3. Labels needed: toxic average precision vs. training-set size. The MLP
+# 4. Labels needed: toxic average precision vs. training-set size. The MLP
 # lines use the same three random subsets per size as the BERT runs (reps 0-2
 # of the sweep in src/reevaluate.py), so every point compares like with like.
 def labels_needed():
@@ -123,6 +152,7 @@ def labels_needed():
 
 if __name__ == "__main__":
     ranking()
+    roc_zoom()
     per_label()
     if os.path.exists("results/bert_sweep.json"):
         labels_needed()
