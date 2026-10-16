@@ -137,12 +137,7 @@ The last post ended with "the first thing to get right is the embedding model". 
 
 But it needs a GPU to train, it's a 438 MB model, and on the rarest labels it did worse than Jev, which never saw a single example. For the common labels, with thousands of examples and a GPU, fine-tuning is the strongest option I've tried. For my blog, with a hundred comments and one question, it doesn't change my choice: Jev is still the right trade.
 
-## What to try next
-
-- **Fix the rare labels.** The label sweep hints that the full run simply didn't train long enough on `threat` and `identity_hate`. Training for more passes, weighting the rare labels more heavily in the loss, or training a separate model per label are all small changes to the loop above.
-- **Fine-tune a smaller model.** A smaller model like DistilBERT could keep most of the quality at a size that fits in a browser.
-
-The code, cached predictions and analysis scripts are in [the repository][repo], including the sweep script, so you can try either one yourself. If you do, I'd love to hear how it goes!
+The code, cached predictions and analysis scripts are in [the repository][repo].
 
 [prev]: https://bandarra.me/posts/jev-vs-custom-classifier
 [jev]: https://docs.typesafe.ai/concepts/system-one
