@@ -21,19 +21,18 @@ MODELS = [  # key, label, color, filled marker?
     ("pytorch_gemini", "MLP, cloud embeddings", BLUE, True),
     ("knn_gemini", "k-NN, cloud embeddings", ORANGE, True),
     ("jev", "Jev (no training)", AQUA, True),
-    ("pytorch_minilm", "MLP, MiniLM embeddings", BLUE, False),
-    ("knn_minilm", "k-NN, MiniLM embeddings", ORANGE, False),
 ]
 
 
 # 1. Ranking quality on `toxic`, as in the first article, with BERT added.
 def ranking():
-    fig, axes = plt.subplots(1, 2, figsize=(9, 3.9), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.0), sharey=True)
     ys = np.arange(len(MODELS))[::-1]
-    for ax, metric, ci_key, title in [
-        (axes[0], "roc_auc", "toxic_roc_auc", "ROC-AUC"),
-        (axes[1], "avg_precision", "toxic_avg_precision", "Average precision"),
+    for ax, metric, ci_key, title, xlim in [
+        (axes[0], "roc_auc", "toxic_roc_auc", "ROC-AUC", (0.92, 1.0)),
+        (axes[1], "avg_precision", "toxic_avg_precision", "Average precision", (0.70, 0.95)),
     ]:
+        ax.set_xlim(*xlim)
         for y, (key, label, color, filled) in zip(ys, MODELS):
             m = FD["models"][key]
             v = m["per_label"]["toxic"][metric]
@@ -41,11 +40,9 @@ def ranking():
             ax.plot([lo, hi], [y, y], color=color, linewidth=2, solid_capstyle="round")
             ax.plot([v], [y], "o", markersize=9, color=color if filled else SURF,
                     markeredgecolor=color, markeredgewidth=2, zorder=5)
-            ax.text(hi + 0.008, y, f"{v:.2f}", va="center", fontsize=10, color=INK2)
+            ax.text(hi + (xlim[1] - xlim[0]) * 0.03, y, f"{v:.2f}", va="center", fontsize=10, color=INK2)
         ax.set_title(title, loc="left", fontsize=11, color=INK, pad=10)
         grid(ax, "x")
-    axes[0].set_xlim(0.80, 1.0)
-    axes[1].set_xlim(0.45, 0.97)
     axes[0].set_yticks(ys)
     axes[0].set_yticklabels([m[1] for m in MODELS])
     axes[0].tick_params(axis="y", length=0)
@@ -90,7 +87,7 @@ def labels_needed():
     sweep_runs = R["sweep"]["runs"]
 
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
-    for emb, color, ls, label in [("gemini", BLUE, "-", "MLP, cloud"), ("minilm", BLUE, "--", "MLP, MiniLM")]:
+    for emb, color, ls, label in [("gemini", BLUE, "-", "MLP, cloud")]:
         n = sorted({r["n"] for r in sweep_runs if r["n"] >= 50})
         v = [[r["mlp"]["toxic_ap"] for r in sweep_runs if r["embedding"] == emb and r["n"] == x and r["rep"] in reps]
              for x in n]
@@ -117,7 +114,7 @@ def labels_needed():
     ticks = [50, 100, 250, 500, 1000, 2000, 4000, 8000]
     ax.set_xticks(ticks); ax.set_xticklabels([f"{t:,}" for t in ticks])
     ax.minorticks_off()
-    ax.set_xlim(42, 8000 * 1.05); ax.set_ylim(0, 1)
+    ax.set_xlim(42, 8000 * 1.05); ax.set_ylim(0.4, 1)
     ax.set_xlabel("Labeled training examples (log scale)")
     ax.set_ylabel("Average precision on the toxic label")
     grid(ax)
