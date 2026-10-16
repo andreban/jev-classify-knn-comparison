@@ -85,6 +85,8 @@ The article draft, notes, chart script, and all 6 chart images are stored in **Z
 - **`article.md` Note UUID**: `0866d5e2-cc91-4f4a-9016-020ae63a1b5f`
 - **`notes.md` Note UUID**: `c1c2608b-256d-4c5c-ad97-413d1a3fe393`
 - **`metadata.md` Note UUID**: `2f22ab5e-8b2d-4965-b513-5913efa05b0a`
+- **`article-bert.md` Note UUID** (BERT follow-up; charts `bert-*.png` attached): `5e29e173-dd1d-4223-b23d-192ca0f20ef0`
+- **`metadata-bert.md` Note UUID**: `f445f8a0-532e-413a-afdc-c8331b6f3976`
 
 When editing `article.md`, `notes.md`, or regenerating plots in `charts.py`, keep the local files and ZNotes in sync:
 
@@ -92,6 +94,7 @@ When editing `article.md`, `notes.md`, or regenerating plots in `charts.py`, kee
 # Update article.md and notes.md in ZNotes
 znotes notes update 0866d5e2-cc91-4f4a-9016-020ae63a1b5f --file article.md
 znotes notes update c1c2608b-256d-4c5c-ad97-413d1a3fe393 --file notes.md
+znotes notes update 5e29e173-dd1d-4223-b23d-192ca0f20ef0 --file article-bert.md
 
 # Inspect files attached to the article in ZNotes
 znotes files list --path "articles/jev-classify-knn-comparison"
