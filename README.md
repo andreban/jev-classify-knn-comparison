@@ -1,10 +1,11 @@
-# Jev vs. PyTorch MLP vs. k-NN Classification Benchmark
+# Jev vs. PyTorch MLP vs. k-NN (and BERT) Classification Benchmark
 
-Head-to-head comparison of three text classification approaches on 10,000 comments (`8,000` train / `2,000` validation, `seed=1`) from the [Kaggle Jigsaw Toxic Comment Classification Challenge][1]:
+Head-to-head comparison of four text classification approaches on 10,000 comments (`8,000` train / `2,000` validation, `seed=1`) from the [Kaggle Jigsaw Toxic Comment Classification Challenge][1]:
 
 1. **Custom PyTorch MLP (`ToxicityModel`)** trained on embeddings (`768d` Cloud `CLASSIFICATION` embeddings and `384d` local `all-MiniLM-L6-v2`).
 2. **Pure $k$-Nearest Neighbors ($K = 7$)** over the same embeddings.
 3. **Jev (`System One`, `jev-1.13.0`)** zero-shot classification using six `Noul` questions per comment.
+4. **Fine-tuned BERT (`bert-base-uncased`)** trained end-to-end on the 8,000 training comments (`src/eval_bert.py`). Added after the article was published; covered by the follow-up draft [article-bert.md](article-bert.md).
 
 See [WALKTHROUGH.md](WALKTHROUGH.md) for the methodology, [article.md](article.md) for the blog post draft, and [notes.md](notes.md) for evaluation notes.
 
@@ -48,6 +49,10 @@ Once restored, you can re-run the PyTorch training or $k$-NN sweeps locally with
 ```shell
 PYTHONPATH=src .venv/bin/python src/eval_pytorch.py --embedding both
 PYTHONPATH=src .venv/bin/python src/eval_knn.py --embedding both
+PYTHONPATH=src .venv/bin/python src/eval_bert.py      # fine-tune BERT on all 8,000 rows (GPU recommended)
+PYTHONPATH=src .venv/bin/python src/sweep_bert.py     # BERT training-size sweep (slow on CPU, resumable)
+PYTHONPATH=src .venv/bin/python src/bench_bert_latency.py
+.venv/bin/python charts_bert.py                        # follow-up article charts
 
 # Fair-threshold re-evaluation, bootstrap CIs and the repeated training-size sweep
 PYTHONPATH=src .venv/bin/python src/reevaluate.py

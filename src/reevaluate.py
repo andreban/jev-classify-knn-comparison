@@ -48,6 +48,12 @@ CONFIGS = {
     "pytorch_minilm": "results/pytorch_minilm.jsonl",
     "knn_minilm": "results/knn_minilm.jsonl",
 }
+# Models added after the article was published. They draw their threshold
+# splits from their own RNG so the shared RNG stream above, and with it every
+# published number, stays exactly the same.
+LATER_CONFIGS = {
+    "bert": "results/bert.jsonl",
+}
 EMBEDDINGS = {
     "gemini": {"file": "YT-comments-text-embedding-004-768-10k.jsonl", "steps": 1600},
     "minilm": {"file": "SP-all-MiniLM-L6-v2.jsonl", "steps": 2400},
@@ -93,6 +99,7 @@ def cv_threshold_f1(y, p, rng, repeats=CV_REPEATS):
 
 def full_data_analysis(rng):
     preds = {k: load_predictions(v) for k, v in CONFIGS.items()}
+    preds |= {k: load_predictions(v) for k, v in LATER_CONFIGS.items() if Path(v).exists()}
     y = preds["jev"][1]
     for k, (_, yk) in preds.items():
         assert (yk == y).all(), k
@@ -106,10 +113,11 @@ def full_data_analysis(rng):
         return float(np.mean([metric(yy[:, j], pp[:, j]) for j in range(6)]))
 
     for name, (p, _) in preds.items():
+        model_rng = rng if name in CONFIGS else np.random.default_rng(SEED)
         per_label = {}
         for j, label in enumerate(LABELS):
             f05, tp, fp = f1_at(y[:, j], p[:, j], 0.5)
-            cvf, cvt = cv_threshold_f1(y[:, j], p[:, j], rng)
+            cvf, cvt = cv_threshold_f1(y[:, j], p[:, j], model_rng)
             per_label[label] = {
                 "roc_auc": float(roc_auc_score(y[:, j], p[:, j])),
                 "avg_precision": float(average_precision_score(y[:, j], p[:, j])),
@@ -133,21 +141,29 @@ def full_data_analysis(rng):
             },
         }
 
-    # Paired bootstrap: Jev minus each other model.
-    diffs = {}
+    # Paired bootstrap: a reference model minus each other model.
+    def paired_diffs(ref):
+        diffs = {}
+        pr = preds[ref][0]
+        for name in preds:
+            if name == ref:
+                continue
+            po = preds[name][0]
+            d = {}
+            for mname, metric in [("roc_auc", roc_auc_score), ("avg_precision", average_precision_score)]:
+                tox = np.array([metric(y[ii, 0], pr[ii, 0]) - metric(y[ii, 0], po[ii, 0]) for ii in boot_idx])
+                mac = np.array([macro(metric, y[ii], pr[ii]) - macro(metric, y[ii], po[ii]) for ii in boot_idx])
+                d[f"toxic_{mname}"] = {"median": float(np.median(tox)), "ci95": np.percentile(tox, [2.5, 97.5]).tolist(),
+                                       "share_ref_ahead": float((tox > 0).mean())}
+                d[f"macro_{mname}"] = {"median": float(np.median(mac)), "ci95": np.percentile(mac, [2.5, 97.5]).tolist(),
+                                       "share_ref_ahead": float((mac > 0).mean())}
+            diffs[name] = d
+        return diffs
+
     pj = preds["jev"][0]
-    for name in CONFIGS:
-        if name == "jev":
-            continue
-        po = preds[name][0]
-        d = {}
-        for mname, metric in [("roc_auc", roc_auc_score), ("avg_precision", average_precision_score)]:
-            tox = np.array([metric(y[ii, 0], pj[ii, 0]) - metric(y[ii, 0], po[ii, 0]) for ii in boot_idx])
-            mac = np.array([macro(metric, y[ii], pj[ii]) - macro(metric, y[ii], po[ii]) for ii in boot_idx])
-            d[f"toxic_{mname}"] = {"median": float(np.median(tox)), "ci95": np.percentile(tox, [2.5, 97.5]).tolist()}
-            d[f"macro_{mname}"] = {"median": float(np.median(mac)), "ci95": np.percentile(mac, [2.5, 97.5]).tolist()}
-        diffs[name] = d
-    out["jev_minus_model"] = diffs
+    out["jev_minus_model"] = paired_diffs("jev")
+    if "bert" in preds:
+        out["bert_minus_model"] = paired_diffs("bert")
 
     # Jev threshold table on toxic (descriptive, full validation set).
     table = []
@@ -276,14 +292,34 @@ def run_sweep():
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--no-sweep",
+        action="store_true",
+        help="Skip re-running the 10x10 training-size sweep and preserve existing sweep in results/reevaluation.json",
+    )
+    args = parser.parse_args()
+
+    out_path = Path("results/reevaluation.json")
+    existing_sweep = None
+    if args.no_sweep and out_path.exists():
+        existing_data = json.loads(out_path.read_text(encoding="utf-8"))
+        existing_sweep = existing_data.get("sweep")
+
     rng = np.random.default_rng(SEED)
     out = {"full_data": full_data_analysis(rng)}
-    if all(Path(c["file"]).exists() for c in EMBEDDINGS.values()):
+    if args.no_sweep:
+        if existing_sweep is not None:
+            out["sweep"] = existing_sweep
+        print("Skipped sweep (--no-sweep); preserved existing sweep data.")
+    elif all(Path(c["file"]).exists() for c in EMBEDDINGS.values()):
         rows, summary = run_sweep()
         out["sweep"] = {"repeats": REPEATS, "sizes": SWEEP_SIZES, "summary": summary, "runs": rows}
     else:
         print("Embedding files missing; skipping sweep (run ./scripts/restore_data.sh).")
-    Path("results/reevaluation.json").write_text(json.dumps(out, indent=1))
+    out_path.write_text(json.dumps(out, indent=1))
     print("wrote results/reevaluation.json")
 
 

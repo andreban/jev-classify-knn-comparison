@@ -1,0 +1,56 @@
+{
+  "approach": "bert",
+  "model_name": "bert-base-uncased",
+  "device": "mps",
+  "num_parameters": 109486854,
+  "float32_bytes": 437947416,
+  "train_size": 8000,
+  "val_size": 2000,
+  "epochs": 3,
+  "lr": 2e-05,
+  "weight_decay": 0.01,
+  "warmup_ratio": 0.1,
+  "batch_size": 16,
+  "eval_batch_size": 32,
+  "max_length": 128,
+  "seed": 1,
+  "val_element_accuracy": 0.9835833333333334,
+  "train_time_seconds": 544.1074602499721,
+  "val_inference_time_seconds": 9.104655375005677,
+  "per_comment_latency_ms": 4.552327687502839,
+  "epoch_history": [
+    {
+      "epoch": 1,
+      "avg_train_loss": 0.17524747125431894,
+      "epoch_train_seconds": 171.38198329199804,
+      "val_inference_seconds": 9.369907542015426,
+      "val_element_accuracy": 0.98125,
+      "toxic_roc_auc": 0.9766897475988385,
+      "toxic_avg_precision": 0.8853033559902823,
+      "macro_roc_auc": 0.9306779975468017,
+      "macro_avg_precision": 0.529578759232148
+    },
+    {
+      "epoch": 2,
+      "avg_train_loss": 0.052801812570542096,
+      "epoch_train_seconds": 170.61002816696418,
+      "val_inference_seconds": 8.83707141695777,
+      "val_element_accuracy": 0.9829166666666667,
+      "toxic_roc_auc": 0.9791527064254337,
+      "toxic_avg_precision": 0.8843459030536625,
+      "macro_roc_auc": 0.9395521646560309,
+      "macro_avg_precision": 0.5434976763496693
+    },
+    {
+      "epoch": 3,
+      "avg_train_loss": 0.04181709538772702,
+      "epoch_train_seconds": 174.13620300003095,
+      "val_inference_seconds": 9.465784874977544,
+      "val_element_accuracy": 0.9835833333333334,
+      "toxic_roc_auc": 0.9788965825329462,
+      "toxic_avg_precision": 0.8842894528599322,
+      "macro_roc_auc": 0.9407433448293742,
+      "macro_avg_precision": 0.5441239874082029
+    }
+  ]
+}

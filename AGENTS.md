@@ -1,10 +1,11 @@
 # Agent Instructions (`jev-classify-knn-comparison`)
 
-This repository contains the benchmark code, cached evaluation outputs, chart generator, and blog post draft comparing three text classification approaches on 10,000 comments from the **Kaggle Jigsaw Toxic Comment Classification Challenge** (`8,000` train / `2,000` validation, deterministic `seed=1` split across 6 binary labels: `toxic`, `severe_toxic`, `obscene`, `threat`, `insult`, `identity_hate`):
+This repository contains the benchmark code, cached evaluation outputs, chart generator, and blog post draft comparing four text classification approaches on 10,000 comments from the **Kaggle Jigsaw Toxic Comment Classification Challenge** (`8,000` train / `2,000` validation, deterministic `seed=1` split across 6 binary labels: `toxic`, `severe_toxic`, `obscene`, `threat`, `insult`, `identity_hate`):
 
 1. **Custom PyTorch MLP (`ToxicityModel`)** trained on embeddings (`768d` Cloud `CLASSIFICATION` embeddings and `384d` local `sentence-transformers/all-MiniLM-L6-v2`).
 2. **Pure $k$-Nearest Neighbors ($K = 7$)** over the same embeddings.
 3. **Jev (`System One`, `jev-1.13.0`)** zero-shot classification using six `Noul` questions per comment.
+4. **Fine-tuned BERT (`bert-base-uncased`)** trained end-to-end on the 8,000 training comments (`src/eval_bert.py`). Added after `article.md` was published; it is the subject of the follow-up draft `article-bert.md` (metadata in `metadata-bert.md`, charts from `charts_bert.py`). Do not fold BERT into `article.md`, and keep BERT in `LATER_CONFIGS` in `src/reevaluate.py` so the published numbers stay reproducible.
 
 ---
 
@@ -16,6 +17,9 @@ This repository contains the benchmark code, cached evaluation outputs, chart ge
 ### Already Committed in Git (`results/` & root)
 - **Cached Predictions (2,000 validation rows)**:
   - `results/jev.jsonl`, `results/jev_checkpoint.jsonl`, `results/jev_meta.json`
+  - `results/bert.jsonl`, `results/bert_meta.json` (fine-tuned `bert-base-uncased` from `src/eval_bert.py`)
+  - `results/bert_sweep.json`, `results/bert_sweep_runs.jsonl` (BERT training-size sweep, `src/sweep_bert.py`)
+  - `results/latency_bert.json` (BERT latency per machine, `src/bench_bert_latency.py`; `results/latency_local.json` holds the published Ryzen numbers and must not be overwritten from another machine)
   - `results/pytorch_gemini.jsonl`, `results/pytorch_gemini_meta.json`
   - `results/pytorch_minilm.jsonl`, `results/pytorch_minilm_meta.json`
   - `results/knn_gemini.jsonl`, `results/knn_gemini_meta.json`
@@ -81,6 +85,8 @@ The article draft, notes, chart script, and all 6 chart images are stored in **Z
 - **`article.md` Note UUID**: `0866d5e2-cc91-4f4a-9016-020ae63a1b5f`
 - **`notes.md` Note UUID**: `c1c2608b-256d-4c5c-ad97-413d1a3fe393`
 - **`metadata.md` Note UUID**: `2f22ab5e-8b2d-4965-b513-5913efa05b0a`
+- **`article-bert.md` Note UUID** (BERT follow-up; charts `bert-*.png` attached): `5e29e173-dd1d-4223-b23d-192ca0f20ef0`
+- **`metadata-bert.md` Note UUID**: `f445f8a0-532e-413a-afdc-c8331b6f3976`
 
 When editing `article.md`, `notes.md`, or regenerating plots in `charts.py`, keep the local files and ZNotes in sync:
 
@@ -88,6 +94,7 @@ When editing `article.md`, `notes.md`, or regenerating plots in `charts.py`, kee
 # Update article.md and notes.md in ZNotes
 znotes notes update 0866d5e2-cc91-4f4a-9016-020ae63a1b5f --file article.md
 znotes notes update c1c2608b-256d-4c5c-ad97-413d1a3fe393 --file notes.md
+znotes notes update 5e29e173-dd1d-4223-b23d-192ca0f20ef0 --file article-bert.md
 
 # Inspect files attached to the article in ZNotes
 znotes files list --path "articles/jev-classify-knn-comparison"
